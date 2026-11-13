@@ -18,8 +18,13 @@ const COARENA_MODELS = [
 
 export const PRESETS = [
   {
+    id: 'coarena', name: 'Coarena', format: 'openai', baseUrl: 'https://coarena.ai/api/v1', keyPrefix: 'coa_',
+    models: COARENA_MODELS, defaultModel: 'claude-sonnet-5-5', maxParallel: 2,
+    hint: 'Coarena के docs: रोज़ $5 तक मुफ्त, एक मिनट में 30 और एक साथ 2 requests। यह site आपके requests का रिकॉर्ड रखती है — निजी जानकारी न डालें।',
+  },
+  {
     id: 'anthropic', name: 'Anthropic (Claude)', format: 'anthropic',
-    baseUrl: 'https://api.anthropic.com', anthropicVersion: '2026-10-21',
+    baseUrl: 'https://api.anthropic.com', anthropicVersion: '2026-10-21', keyPrefix: 'sk-ant-',
     models: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-2'],
     defaultModel: 'claude-sonnet-5-5', maxTokens: 64000, maxParallel: 4,
     hint: 'Key: platform.claude.com → API Keys। यह API अलग से billed होता है।',
@@ -29,16 +34,16 @@ export const PRESETS = [
     maxParallel: 4, hint: 'Key: platform.openai.com → API keys।',
   },
   {
-    id: 'openrouter', name: 'OpenRouter', format: 'openai', baseUrl: 'https://openrouter.ai/api/v1',
+    id: 'openrouter', name: 'OpenRouter', format: 'openai', baseUrl: 'https://openrouter.ai/api/v1', keyPrefix: 'sk-or-',
     maxParallel: 4, hint: 'Key: openrouter.ai → Keys। कई मॉडल एक key से; कुछ मॉडल ":free" वाले होते हैं।',
   },
   {
     id: 'gemini', name: 'Google Gemini', format: 'openai',
-    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', keyPrefix: 'AIza',
     maxParallel: 3, hint: 'Key: aistudio.google.com → Get API key।',
   },
   {
-    id: 'groq', name: 'Groq', format: 'openai', baseUrl: 'https://api.groq.com/openai/v1',
+    id: 'groq', name: 'Groq', format: 'openai', baseUrl: 'https://api.groq.com/openai/v1', keyPrefix: 'gsk_',
     maxParallel: 3, hint: 'Key: console.groq.com → API Keys।',
   },
   {
@@ -50,17 +55,12 @@ export const PRESETS = [
     maxParallel: 3, hint: 'Key: console.mistral.ai → API Keys।',
   },
   {
-    id: 'xai', name: 'xAI (Grok)', format: 'openai', baseUrl: 'https://api.x.ai/v1',
+    id: 'xai', name: 'xAI (Grok)', format: 'openai', baseUrl: 'https://api.x.ai/v1', keyPrefix: 'xai-',
     maxParallel: 3, hint: 'Key: console.x.ai।',
   },
   {
     id: 'together', name: 'Together AI', format: 'openai', baseUrl: 'https://api.together.xyz/v1',
     maxParallel: 3, hint: 'Key: api.together.ai → Settings → API Keys।',
-  },
-  {
-    id: 'coarena', name: 'Coarena', format: 'openai', baseUrl: 'https://coarena.ai/api/v1',
-    models: COARENA_MODELS, defaultModel: 'claude-sonnet-5-5', maxParallel: 2,
-    hint: 'Coarena के docs: रोज़ $5 तक मुफ्त, एक मिनट में 30 और एक साथ 2 requests। यह site आपके requests का रिकॉर्ड रखती है — निजी जानकारी न डालें।',
   },
   {
     id: 'custom-openai', name: 'कोई और (OpenAI-जैसा API)', format: 'openai', baseUrl: '',
@@ -72,6 +72,25 @@ export const PRESETS = [
     hint: 'Anthropic-compatible सेवाओं के लिए। Base URL में /v1/messages न जोड़ें, वह अपने आप जुड़ता है।',
   },
 ];
+
+// Recognise a provider from its API key's well-known prefix.
+export function presetForKey(key) {
+  const k = String(key || '').trim();
+  if (!k) return null;
+  return PRESETS.find(p => p.keyPrefix && k.startsWith(p.keyPrefix)) || null;
+}
+
+function hostOf(url) {
+  try { return new URL(url).host; } catch { return ''; }
+}
+
+// Returns the matching preset when the key clearly belongs to a different
+// provider than the connection's base URL points at; otherwise null.
+export function keyMismatch(conn) {
+  const p = presetForKey(conn.apiKey);
+  if (!p) return null;
+  return hostOf(p.baseUrl) === hostOf(conn.baseUrl) ? null : p;
+}
 
 export class ApiError extends Error {
   constructor(message, status, detail) {
@@ -109,7 +128,7 @@ function headersFor(conn) {
 }
 
 function statusMessage(s) {
-  if (s === 401 || s === 403) return 'API key गलत है, या इस key को यह काम करने की अनुमति नहीं है।';
+  if (s === 401 || s === 403) return 'API key गलत है, किसी दूसरे provider की है, या इसे यह काम करने की अनुमति नहीं है।';
   if (s === 404) return 'Base URL या मॉडल का नाम गलत है।';
   if (s === 400 || s === 422) return 'Provider ने request नहीं मानी। मॉडल का नाम या max tokens जाँचें।';
   if (s === 402) return 'इस account में credit/balance नहीं बचा।';

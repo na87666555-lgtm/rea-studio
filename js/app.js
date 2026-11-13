@@ -1,5 +1,5 @@
 import { loadSettings, saveSettings, loadChats, saveChats, clearAll, uid } from './store.js';
-import { PRESETS, FORMATS, streamChat, listModels, friendlyError } from './providers.js';
+import { PRESETS, FORMATS, streamChat, listModels, friendlyError, presetForKey, keyMismatch } from './providers.js';
 import { renderMarkdown, escapeHtml } from './markdown.js';
 import { acquire, release } from './queue.js';
 
@@ -179,7 +179,8 @@ function messageHtml(chat, m, i) {
   let extra = '';
   if (m.error) {
     extra += `<div class="err-box"><strong>${escapeHtml(m.error.title)}</strong>` +
-      (m.error.detail ? `<div class="err-detail">${escapeHtml(m.error.detail)}</div>` : '') + '</div>';
+      (m.error.detail ? `<div class="err-detail">${escapeHtml(m.error.detail)}</div>` : '') +
+      (m.error.hint ? `<div class="err-hint">💡 ${escapeHtml(m.error.hint)}</div>` : '') + '</div>';
   }
   if (m.stopped) extra += '<div class="status-line">⏹ रोका गया</div>';
   if (m.stopReason === 'max_tokens' || m.stopReason === 'length') extra += '<div class="status-line">जवाब लंबाई की सीमा पर कट गया।</div>';
@@ -298,7 +299,13 @@ async function runGeneration(chat) {
     if (!msg.content && msg.stopReason !== 'refusal') msg.error = { title: 'मॉडल ने खाली जवाब दिया।', detail: '' };
   } catch (e) {
     if (e?.name === 'AbortError') msg.stopped = true;
-    else msg.error = friendlyError(e);
+    else {
+      msg.error = friendlyError(e);
+      const mm = c && keyMismatch(c);
+      if (mm) {
+        msg.error.hint = `यह key ${mm.name} की लगती है, लेकिन "${c.name}" किसी दूसरे provider का पता है। ☰ → ⚙ API और सेटिंग्स में इसे "बदलें" दबाकर सेव करें, ऐप सही सेटिंग अपने आप भर देगा।`;
+      }
+    }
   } finally {
     if (acquired) release(c.id, c.maxParallel);
     delete msg.pending;
@@ -523,6 +530,21 @@ function openConnDialog(id) {
   $('#connDialog').showModal();
 }
 
+// Pasting a key with a known prefix (e.g. coa_ for Coarena) picks that provider.
+function onKeyInput() {
+  const p = presetForKey($('#cdKey').value);
+  if (!p) return;
+  if (!editingConnId) {
+    if ($('#cdPreset').value !== p.id) {
+      $('#cdPreset').value = p.id;
+      applyPreset(p);
+      $('#cdStatus').textContent = `✓ key से पहचाना: ${p.name}। सेटिंग अपने आप भर दी गई।`;
+    }
+  } else if (keyMismatch({ apiKey: $('#cdKey').value, baseUrl: $('#cdBase').value })) {
+    $('#cdStatus').textContent = `यह key ${p.name} की लगती है। सेव दबाने पर सही सेटिंग भरने का विकल्प मिलेगा।`;
+  }
+}
+
 function draftConn() {
   const v = connFormValues();
   return { id: editingConnId || 'draft', ...v };
@@ -539,6 +561,8 @@ async function cdTest() {
   const d = draftConn();
   const status = $('#cdStatus');
   if (!d.baseUrl || !d.defaultModel) { status.textContent = 'टेस्ट के लिए Base URL और मॉडल दोनों चाहिए।'; return; }
+  const mm = keyMismatch(d);
+  if (mm) { status.textContent = `✕ यह key ${mm.name} की लगती है। ऊपर Provider में "${mm.name}" चुनें।`; return; }
   status.textContent = 'टेस्ट हो रहा है…';
   let text = '';
   try {
@@ -569,6 +593,20 @@ function saveConnDialog(e) {
   if (/^http:\/\//i.test(v.baseUrl) && !/^http:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(v.baseUrl)) {
     toast('सुरक्षा के लिए https:// वाला पता डालें।');
     return;
+  }
+  const mm = keyMismatch(v);
+  if (mm && confirm(`यह key ${mm.name} की लगती है, लेकिन Base URL किसी दूसरे provider का है।\n\n${mm.name} की सही सेटिंग अपने आप भर दूँ?`)) {
+    const wasPresetName = !v.name || PRESETS.some(p => p.name === v.name);
+    Object.assign(v, {
+      format: mm.format,
+      baseUrl: mm.baseUrl,
+      defaultModel: mm.defaultModel || v.defaultModel,
+      maxParallel: mm.maxParallel || v.maxParallel,
+      maxTokens: mm.maxTokens || '',
+      anthropicVersion: mm.anthropicVersion || v.anthropicVersion,
+    });
+    if (wasPresetName) v.name = mm.name;
+    dialogModels = mm.models || [];
   }
   if (editingConnId) {
     const c = conn(editingConnId);
@@ -937,6 +975,7 @@ function init() {
     if (p) applyPreset(p);
   });
   $('#cdFormat').addEventListener('change', syncFormatFields);
+  $('#cdKey').addEventListener('input', onKeyInput);
 
   window.addEventListener('beforeinstallprompt', e => {
     e.preventDefault();

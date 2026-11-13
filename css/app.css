@@ -285,3 +285,4 @@ details label { margin-top: 10px; }
 .welcome .install-btn { margin-top: 6px; }
 .install-steps h3 { margin: 4px 0; font-size: 16px; }
 .install-steps ol { margin: 0; padding-left: 1.3em; display: flex; flex-direction: column; gap: 6px; font-size: 15px; }
+.err-hint { margin-top: 6px; font-size: 13px; color: var(--text); }
