@@ -25,6 +25,7 @@
         <button type="button" class="btn primary block" data-action="new-chat">+ नई चैट</button>
         <button type="button" class="btn block" data-action="show-multi">⚡ एक साथ कई काम</button>
         <button type="button" class="btn block" data-action="show-settings">⚙ API और सेटिंग्स</button>
+        <button type="button" class="btn block install-btn" data-action="install" hidden>📲 ऐप इंस्टॉल करें</button>
       </div>
       <div class="drawer-label">चैट</div>
       <ul id="chatList" class="chat-list"></ul>
@@ -125,6 +126,33 @@
       <div class="dlg-actions">
         <button type="button" class="btn" data-action="close-dialog">रद्द</button>
         <button type="submit" class="btn primary">सेव</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="installDialog" class="dlg">
+    <form id="installForm">
+      <h2>📲 फ़ोन पर ऐप इंस्टॉल करें</h2>
+      <p class="hint">आपका ब्राउज़र सीधा इंस्टॉल बटन नहीं दे रहा, इसलिए ये 3 आसान कदम करें:</p>
+      <div id="installAndroid" class="install-steps">
+        <h3>Android (Chrome)</h3>
+        <ol>
+          <li>यह पेज <strong>Chrome</strong> में खुला होना चाहिए। अगर WhatsApp या किसी दूसरे ऐप के अंदर खुला है, तो ⋮ दबाकर <strong>"Chrome में खोलें"</strong> चुनें, या नीचे से लिंक कॉपी करके Chrome में खोलें।</li>
+          <li>ऊपर दाईं ओर <strong>⋮</strong> (तीन बिंदु) दबाएँ।</li>
+          <li><strong>"ऐप इंस्टॉल करें / Install app"</strong> या <strong>"होम स्क्रीन पर जोड़ें"</strong> दबाएँ, फिर <strong>इंस्टॉल</strong>।</li>
+        </ol>
+      </div>
+      <div id="installIos" class="install-steps">
+        <h3>iPhone (Safari)</h3>
+        <ol>
+          <li>यह पेज <strong>Safari</strong> में खोलें।</li>
+          <li>नीचे <strong>Share</strong> बटन (⬆️ वाला चौकोर) दबाएँ।</li>
+          <li><strong>"Add to Home Screen"</strong> → <strong>Add</strong> दबाएँ।</li>
+        </ol>
+      </div>
+      <button type="button" class="btn small" data-action="copy-link">🔗 ऐप का लिंक कॉपी करें</button>
+      <div class="dlg-actions">
+        <button type="button" class="btn primary" data-action="close-dialog">ठीक है</button>
       </div>
     </form>
   </dialog>

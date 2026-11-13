@@ -16,6 +16,7 @@ let batch = null; // { chatIds: [] }
 const multiDraft = { tasks: '', prefix: '', targets: [] };
 let editingConnId = null;
 let deferredInstall = null;
+let installed = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 
 const coarsePointer = matchMedia('(pointer: coarse)').matches;
 
@@ -159,6 +160,7 @@ function welcomeHtml() {
     <h1>Rea Studio</h1>
     <p>किसी भी AI provider की अपनी API key लगाइए, और कई चैट एक साथ चलाइए।</p>
     ${steps}
+    <button type="button" class="btn install-btn" data-action="install"${installed ? ' hidden' : ''}>📲 ऐप इंस्टॉल करें</button>
   </div>`;
 }
 
@@ -622,8 +624,9 @@ function renderSettings() {
     <textarea id="globalSystem" rows="3" placeholder="जैसे: हमेशा आसान हिंदी में जवाब दो।">${escapeHtml(settings.systemPrompt || '')}</textarea>
 
     <h2>फ़ोन पर ऐप की तरह इंस्टॉल करें</h2>
-    <p class="muted">Android Chrome: ऊपर ⋮ मेनू → "Install app" या "होम स्क्रीन में जोड़ें"। iPhone Safari: Share → "Add to Home Screen"।</p>
-    <button type="button" class="btn" data-action="install" id="installBtn" ${deferredInstall ? '' : 'hidden'}>📲 अभी इंस्टॉल करें</button>
+    ${installed
+      ? '<p class="muted">✓ यह ऐप इंस्टॉल होकर चल रहा है।</p>'
+      : '<button type="button" class="btn primary install-btn" data-action="install">📲 अभी इंस्टॉल करें</button>'}
 
     <h2>डेटा</h2>
     <div class="row wrap">
@@ -769,6 +772,34 @@ function renderBatchProgress() {
     (live || queued ? '<button type="button" class="btn danger small" data-action="mt-stop">⏹ सब रोकें</button>' : '');
 }
 
+// ---------- install ----------
+
+function syncInstallButtons() {
+  document.querySelectorAll('[data-action="install"]').forEach(b => { b.hidden = installed; });
+}
+
+function openInstallHelp() {
+  const ua = navigator.userAgent;
+  const ios = /iphone|ipad|ipod/i.test(ua) || (/macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+  const android = /android/i.test(ua);
+  $('#installIos').hidden = android && !ios;
+  $('#installAndroid').hidden = ios;
+  $('#installDialog').showModal();
+}
+
+async function installApp() {
+  if (!deferredInstall) { openInstallHelp(); return; }
+  const ev = deferredInstall;
+  deferredInstall = null;
+  try {
+    await ev.prompt();
+    const choice = await ev.userChoice;
+    if (choice && choice.outcome === 'accepted') toast('ऐप इंस्टॉल हो रहा है…');
+  } catch {
+    openInstallHelp();
+  }
+}
+
 // ---------- events ----------
 
 async function copyText(text) {
@@ -862,13 +893,8 @@ function onClick(e) {
         toast('सब कुछ हटा दिया गया।');
       }
       break;
-    case 'install':
-      if (deferredInstall) {
-        deferredInstall.prompt();
-        deferredInstall = null;
-        b.hidden = true;
-      }
-      break;
+    case 'install': closeDrawer(); installApp(); break;
+    case 'copy-link': copyText(location.href.split('#')[0]); break;
     case 'mt-add-target': {
       const d = defaultConn();
       multiDraft.targets.push({ connectionId: d.id, model: '' });
@@ -915,15 +941,22 @@ function init() {
   window.addEventListener('beforeinstallprompt', e => {
     e.preventDefault();
     deferredInstall = e;
-    const btn = $('#installBtn');
-    if (btn) btn.hidden = false;
+    syncInstallButtons();
   });
+  window.addEventListener('appinstalled', () => {
+    installed = true;
+    deferredInstall = null;
+    syncInstallButtons();
+    toast('✓ ऐप इंस्टॉल हो गया। अब होम स्क्रीन से खोलें।');
+  });
+  $('#installForm').addEventListener('submit', e => e.preventDefault());
 
   if (!currentId) {
     const c = createChat();
     currentId = c.id;
   }
   show('chat');
+  syncInstallButtons();
 
   if ('serviceWorker' in navigator && window.isSecureContext) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
