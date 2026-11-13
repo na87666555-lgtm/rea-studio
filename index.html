@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="hi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src *; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#14122b">
+  <meta name="description" content="Rea Studio: अपनी API key से किसी भी AI provider के मॉडल चलाने वाला स्वतंत्र चैट ऐप, जिसमें कई काम एक साथ चलते हैं।">
+  <title>Rea Studio</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/app.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <div id="app">
+    <aside id="drawer" class="drawer" aria-label="चैट सूची">
+      <div class="drawer-head">
+        <div class="brand"><img src="icons/icon.svg" alt="" width="30" height="30"><span>Rea Studio</span></div>
+        <button type="button" class="icon-btn only-mobile" data-action="close-drawer" aria-label="बंद करें">✕</button>
+      </div>
+      <div class="drawer-buttons">
+        <button type="button" class="btn primary block" data-action="new-chat">+ नई चैट</button>
+        <button type="button" class="btn block" data-action="show-multi">⚡ एक साथ कई काम</button>
+        <button type="button" class="btn block" data-action="show-settings">⚙ API और सेटिंग्स</button>
+      </div>
+      <div class="drawer-label">चैट</div>
+      <ul id="chatList" class="chat-list"></ul>
+    </aside>
+    <div id="scrim" class="scrim" data-action="close-drawer" hidden></div>
+
+    <main class="main">
+      <header class="topbar">
+        <button type="button" class="icon-btn only-mobile" data-action="open-drawer" aria-label="मेनू">☰</button>
+        <button type="button" id="backBtn" class="icon-btn" data-action="show-chat" aria-label="वापस" hidden>←</button>
+        <div class="topbar-title" id="topTitle">Rea Studio</div>
+        <button type="button" id="modelChip" class="chip" data-action="open-model">मॉडल चुनें</button>
+      </header>
+
+      <section id="chatView" class="view chat-view">
+        <div id="messages" class="messages" aria-live="polite"></div>
+        <form id="composer" class="composer">
+          <textarea id="input" rows="1" placeholder="संदेश लिखें…" enterkeyhint="enter" aria-label="संदेश"></textarea>
+          <button id="sendBtn" class="send-btn" type="submit" aria-label="भेजें">➤</button>
+        </form>
+      </section>
+
+      <section id="settingsView" class="view panel" hidden></section>
+      <section id="multiView" class="view panel" hidden></section>
+    </main>
+  </div>
+
+  <dialog id="modelDialog" class="dlg">
+    <form id="modelForm">
+      <h2>मॉडल चुनें</h2>
+      <label>API कनेक्शन
+        <select id="mdConn"></select>
+      </label>
+      <label>मॉडल
+        <input id="mdModel" list="mdModelList" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="मॉडल का नाम">
+        <datalist id="mdModelList"></datalist>
+      </label>
+      <button type="button" class="btn small" data-action="md-fetch">↻ मॉडल लिस्ट लाओ</button>
+      <div id="mdStatus" class="hint"></div>
+      <div id="mdModels" class="model-pills"></div>
+      <label>इस चैट के लिए खास निर्देश (वैकल्पिक)
+        <textarea id="mdSystem" rows="3" placeholder="जैसे: तुम एक हिंदी शिक्षक हो।"></textarea>
+      </label>
+      <div class="dlg-actions">
+        <button type="button" class="btn" data-action="close-dialog">रद्द</button>
+        <button type="submit" class="btn primary">सेव</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="connDialog" class="dlg">
+    <form id="connForm">
+      <h2 id="cdTitle">नया API जोड़ें</h2>
+      <label id="cdPresetWrap">Provider
+        <select id="cdPreset"></select>
+      </label>
+      <p id="cdHint" class="hint"></p>
+      <label>नाम
+        <input id="cdName" autocomplete="off" required>
+      </label>
+      <label>API का प्रकार
+        <select id="cdFormat">
+          <option value="openai">OpenAI-जैसा (chat/completions)</option>
+          <option value="anthropic">Anthropic-जैसा (messages)</option>
+        </select>
+      </label>
+      <label>Base URL
+        <input id="cdBase" inputmode="url" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="https://…" required>
+      </label>
+      <label>API Key
+        <span class="key-row">
+          <input id="cdKey" type="password" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="अपनी key यहाँ डालें">
+          <button type="button" class="btn small" data-action="cd-toggle-key">दिखाएँ</button>
+        </span>
+      </label>
+      <label>डिफ़ॉल्ट मॉडल
+        <input id="cdModel" list="cdModelList" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="मॉडल का नाम">
+        <datalist id="cdModelList"></datalist>
+      </label>
+      <div class="row wrap">
+        <button type="button" class="btn small" data-action="cd-fetch">↻ मॉडल लिस्ट लाओ</button>
+        <button type="button" class="btn small" data-action="cd-test">✓ टेस्ट करें</button>
+      </div>
+      <div id="cdStatus" class="hint"></div>
+      <div id="cdModels" class="model-pills"></div>
+      <details>
+        <summary>उन्नत सेटिंग्स</summary>
+        <label>एक साथ कितनी requests (1–20)
+          <input id="cdParallel" type="number" min="1" max="20" inputmode="numeric">
+        </label>
+        <label>Max tokens (जवाब की अधिकतम लंबाई; खाली छोड़ें तो डिफ़ॉल्ट)
+          <input id="cdMaxTokens" type="number" min="1" inputmode="numeric">
+        </label>
+        <label id="cdVersionWrap">anthropic-version
+          <input id="cdVersion" autocomplete="off" spellcheck="false" autocapitalize="off">
+        </label>
+      </details>
+      <div class="dlg-actions">
+        <button type="button" class="btn" data-action="close-dialog">रद्द</button>
+        <button type="submit" class="btn primary">सेव</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>
