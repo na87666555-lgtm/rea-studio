@@ -3,7 +3,7 @@ name: Deploy app to GitHub Pages
 
 on:
   push:
-    branches: ["claude/cloud-proxy-setup-xlw3k9", "main"]
+    branches: ["main"]
   workflow_dispatch:
 
 permissions:
