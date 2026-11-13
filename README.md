@@ -52,6 +52,12 @@
 | `js/store.js` | फ़ोन के ब्राउज़र में सेव करना |
 | `sw.js`, `manifest.webmanifest`, `icons/` | install और offline सपोर्ट |
 
+## अपडेट
+
+ऐप खुला रहते हुए हर कुछ मिनट में `version.json` जाँचता है। नया version मिलने पर, जब कोई जवाब न चल रहा हो और message box खाली हो, तो ऐप खुद को नए version में reload कर लेता है।
+
+नया बदलाव publish करते समय `version.json` और `js/app.js` का `APP_VERSION`, दोनों एक साथ बदलें। `sw.js` का `CACHE` सिर्फ तब बदलें जब `sw.js` का अपना code बदले।
+
 ## English summary
 
 Rea Studio is a dependency-free, installable web app (PWA) for chatting with any AI provider using your own API key. It speaks both the OpenAI-style `/chat/completions` and the Anthropic-style `/v1/messages` streaming formats, so it works with Anthropic, OpenAI, OpenRouter, Gemini, Groq, DeepSeek, Mistral, xAI, Together, Coarena, or any compatible endpoint. Many chats can stream at once, and the multi-task screen fans a list of tasks out across one or more models, with a per-connection concurrency limit. Keys stay in the browser's `localStorage` and are sent only to the configured base URL. There is no build step: serve the repository root as static files (for example with GitHub Pages).

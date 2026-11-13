@@ -2,7 +2,11 @@
 // Only this app's own files are cached; API requests to providers are never
 // touched or stored.
 
-const CACHE = 'rea-studio-v4';
+// The offline copy is refreshed on every successful request, so this name
+// does NOT change with app releases; change it only when this file's logic
+// changes. A new service worker waits until the app is closed before taking
+// over (no skipWaiting/claim), so it never swaps in during a page load.
+const CACHE = 'rea-studio-sw2';
 const ASSETS = [
   './',
   './index.html',
@@ -20,14 +24,16 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  event.waitUntil(
+    caches.open(CACHE)
+      .then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' })))),
+  );
 });
 
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
-      .then(() => self.clients.claim()),
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))),
   );
 });
 
@@ -35,9 +41,12 @@ self.addEventListener('fetch', event => {
   const req = event.request;
   if (req.method !== 'GET') return;
   if (new URL(req.url).origin !== self.location.origin) return;
-  // Network first so updates arrive quickly; cache as the offline fallback.
+  // Network first, revalidating with the server every time (cheap 304s), so a
+  // new version is picked up as soon as it is published; cache is the
+  // offline fallback. version.json is never cached.
+  if (new URL(req.url).pathname.endsWith('/version.json')) return;
   event.respondWith(
-    fetch(req)
+    fetch(req, { cache: 'no-cache' })
       .then(res => {
         if (res.ok) {
           const copy = res.clone();

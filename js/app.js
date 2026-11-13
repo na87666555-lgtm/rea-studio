@@ -3,6 +3,9 @@ import { PRESETS, FORMATS, streamChat, listModels, friendlyError, presetForKey, 
 import { renderMarkdown, escapeHtml } from './markdown.js';
 import { acquire, release } from './queue.js';
 
+// Bump together with version.json on every release.
+const APP_VERSION = '2026.11.14-2';
+
 const $ = (sel, root = document) => root.querySelector(sel);
 const NEW_TITLE = 'नई चैट';
 const MAX_BATCH = 50;
@@ -147,19 +150,10 @@ function renderChatList() {
 
 function welcomeHtml() {
   const has = settings.connections.length > 0;
-  const steps = has
-    ? '<p class="muted">नीचे लिखकर शुरू करें। ऊपर दाईं ओर मॉडल का नाम दबाकर मॉडल बदल सकते हैं।</p>'
-    : `<ol class="steps">
-        <li><strong>⚙ API और सेटिंग्स</strong> में अपनी API key जोड़ें</li>
-        <li>मॉडल चुनें</li>
-        <li>नीचे संदेश लिखें</li>
-      </ol>
-      <button type="button" class="btn primary" data-action="add-conn-direct">+ पहला API जोड़ें</button>`;
   return `<div class="welcome">
-    <img src="icons/icon.svg" alt="" width="68" height="68">
-    <h1>Rea Studio</h1>
-    <p>किसी भी AI provider की अपनी API key लगाइए, और कई चैट एक साथ चलाइए।</p>
-    ${steps}
+    <img src="icons/icon.svg" alt="" width="64" height="64">
+    <h1>चलो काम शुरू करते हैं</h1>
+    ${has ? '' : '<button type="button" class="btn primary" data-action="add-conn-direct">+ API जोड़ें</button>'}
     <button type="button" class="btn install-btn" data-action="install"${installed ? ' hidden' : ''}>📲 ऐप इंस्टॉल करें</button>
   </div>`;
 }
@@ -313,6 +307,7 @@ async function runGeneration(chat) {
     touch(chat);
     persistChats(true);
     refreshStatus(chat);
+    if (pendingUpdate) setTimeout(() => applyUpdate(pendingUpdate), 1500);
   }
 }
 
@@ -810,6 +805,66 @@ function renderBatchProgress() {
     (live || queued ? '<button type="button" class="btn danger small" data-action="mt-stop">⏹ सब रोकें</button>' : '');
 }
 
+// ---------- auto update ----------
+// The app checks version.json while it is open. When a newer version is
+// published it reloads itself, but never while a reply is streaming or while
+// there is unsent text in the message box.
+
+let pendingUpdate = null;
+
+function safeToReload() {
+  return running.size === 0 && !$('#input').value.trim() && !document.querySelector('dialog[open]');
+}
+
+const APP_FILES = ['./', 'index.html', 'css/app.css', 'js/app.js', 'js/store.js', 'js/providers.js',
+  'js/markdown.js', 'js/queue.js', 'manifest.webmanifest', 'sw.js'];
+
+let updating = false;
+async function applyUpdate(version) {
+  pendingUpdate = version;
+  if (updating || !safeToReload()) return;
+  try {
+    if (sessionStorage.getItem('rea.reloadedFor') === version) return; // avoid reload loops
+    sessionStorage.setItem('rea.reloadedFor', version);
+    sessionStorage.setItem('rea.justUpdated', '1');
+  } catch {
+    return;
+  }
+  updating = true;
+  persistChats(true);
+  // Replace the browser's saved copies (GitHub Pages lets them live 10 min)
+  // with fresh ones, so the reload really starts the new version.
+  await Promise.all(APP_FILES.map(u => fetch(u, { cache: 'reload' }).catch(() => {})));
+  location.reload();
+}
+
+async function checkForUpdate() {
+  if (!navigator.onLine) return;
+  try {
+    const res = await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' });
+    if (!res.ok) return;
+    const { version } = await res.json();
+    if (version && version !== APP_VERSION) applyUpdate(version);
+  } catch {
+    // offline or blocked: try again later
+  }
+}
+
+function startAutoUpdate() {
+  try {
+    if (sessionStorage.getItem('rea.justUpdated')) {
+      sessionStorage.removeItem('rea.justUpdated');
+      setTimeout(() => toast('✓ ऐप अपडेट हो गया'), 400);
+    }
+  } catch { /* ignore */ }
+  setTimeout(checkForUpdate, 1500);
+  setInterval(checkForUpdate, 3 * 60 * 1000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') checkForUpdate();
+  });
+  window.addEventListener('online', checkForUpdate);
+}
+
 // ---------- install ----------
 
 function syncInstallButtons() {
@@ -1014,8 +1069,9 @@ function init() {
   syncInstallButtons();
 
   if ('serviceWorker' in navigator && window.isSecureContext) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {});
   }
+  startAutoUpdate();
 }
 
 init();
