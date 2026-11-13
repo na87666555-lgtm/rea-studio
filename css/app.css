@@ -49,7 +49,7 @@ body {
 button, input, select, textarea { font: inherit; color: inherit; }
 a { color: var(--accent); }
 
-#app { display: flex; height: 100vh; height: 100dvh; overflow: hidden; }
+#app { display: flex; height: 100vh; height: var(--app-h, 100dvh); overflow: hidden; }
 
 /* ---------- drawer ---------- */
 .drawer {
@@ -286,3 +286,17 @@ details label { margin-top: 10px; }
 .install-steps h3 { margin: 4px 0; font-size: 16px; }
 .install-steps ol { margin: 0; padding-left: 1.3em; display: flex; flex-direction: column; gap: 6px; font-size: 15px; }
 .err-hint { margin-top: 6px; font-size: 13px; color: var(--text); }
+
+/* Phone opened with Chrome's "Desktop site" on: app.js zooms the page back to
+   the phone's width; these rules restore the phone layout regardless of the
+   (wide) viewport the browser reports. */
+html.force-mobile .drawer {
+  position: fixed; top: 0; bottom: 0; left: 0; z-index: 40; width: 300px; height: var(--app-h);
+  transform: translateX(-102%); transition: transform .2s ease;
+}
+html.force-mobile .drawer.open { transform: none; }
+html.force-mobile .only-mobile { display: inline-flex !important; }
+html.force-mobile .scrim:not([hidden]) { display: block !important; }
+html.force-mobile .chip { max-width: 190px; }
+html.force-mobile .dlg { width: 390px; max-width: none; max-height: calc(var(--app-h) - 40px); }
+html.force-mobile .toast { max-width: 360px; }

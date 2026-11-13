@@ -951,7 +951,23 @@ function onClick(e) {
   }
 }
 
+// Chrome's "Desktop site" mode ignores the viewport tag and lays the page out
+// ~980px wide, so on a phone everything looks tiny. Detect that and scale the
+// app back up to the phone's real width, with the phone layout.
+function fitPhoneInDesktopMode() {
+  const root = document.documentElement;
+  const touch = navigator.maxTouchPoints > 0 || 'ontouchstart' in window;
+  const sw = screen.width;
+  const ratio = window.innerWidth / sw;
+  const on = touch && sw > 0 && sw < 700 && ratio > 1.3;
+  root.classList.toggle('force-mobile', on);
+  root.style.zoom = on ? String(ratio) : '';
+  root.style.setProperty('--app-h', on ? `${window.innerHeight / ratio}px` : '');
+}
+
 function init() {
+  fitPhoneInDesktopMode();
+  window.addEventListener('resize', fitPhoneInDesktopMode);
   document.addEventListener('click', onClick);
   $('#composer').addEventListener('submit', onSubmit);
   const input = $('#input');

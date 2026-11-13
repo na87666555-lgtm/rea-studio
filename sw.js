@@ -2,7 +2,7 @@
 // Only this app's own files are cached; API requests to providers are never
 // touched or stored.
 
-const CACHE = 'rea-studio-v3';
+const CACHE = 'rea-studio-v4';
 const ASSETS = [
   './',
   './index.html',
