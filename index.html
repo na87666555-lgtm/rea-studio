@@ -23,6 +23,7 @@
       </div>
       <div class="drawer-buttons">
         <button type="button" class="btn primary block" data-action="new-chat">+ नई चैट</button>
+        <button type="button" class="btn team-entry block" data-action="new-team">✦ तीन AI · एक चैट</button>
         <button type="button" class="btn block" data-action="show-multi">⚡ एक साथ कई काम</button>
         <button type="button" class="btn block" data-action="show-settings">⚙ API और सेटिंग्स</button>
         <button type="button" class="btn block install-btn" data-action="install" hidden>📲 ऐप इंस्टॉल करें</button>
@@ -57,6 +58,24 @@
       <section id="multiView" class="view panel" hidden></section>
     </main>
   </div>
+
+  <dialog id="teamDialog" class="dlg team-dialog">
+    <form id="teamForm">
+      <h2>✦ तीन AI · एक प्रोजेक्ट</h2>
+      <p class="hint">ChatGPT, Gemini और Claude एक ही बातचीत और फ़ाइलों पर काम करेंगे। उनके सुझाव मिलाकर एक साझा जवाब मिलेगा।</p>
+      <label>प्रोजेक्ट का नाम<input id="tdTitle" maxlength="100" placeholder="मेरा साझा प्रोजेक्ट"></label>
+      <div id="teamMembers"></div>
+      <button type="button" class="btn small" data-action="team-add-api">+ API कनेक्शन जोड़ें</button>
+      <p class="hint">हर सदस्य के लिए उसका मॉडल चुनें। एक ऐसा API भी चुन सकते हैं जिसमें तीनों के मॉडल हों। हर सवाल पर तीन योगदान और एक साझा जवाब के लिए API requests चलेंगी।</p>
+      <label>साझा जवाब तैयार करे<select id="tdCoordinator"><option value="0">ChatGPT</option><option value="1">Gemini</option><option value="2" selected>Claude</option></select></label>
+      <label>प्रोजेक्ट के साझा निर्देश<textarea id="tdSystem" rows="3" placeholder="उद्देश्य, ज़रूरतें और तीनों को याद रखने वाली बातें…"></textarea></label>
+      <p id="tdStatus" class="hint" role="status"></p>
+      <div class="dlg-actions">
+        <button type="button" class="btn" data-action="close-dialog">रद्द</button>
+        <button type="submit" class="btn primary">टीम सेव करें</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog id="modelDialog" class="dlg">
     <form id="modelForm">

@@ -4,9 +4,10 @@ import { enabledTools, runTool, toolSystemPrompt, toolLabel, toolSettings } from
 import { addAttachment, getFile, deleteFiles, clearFiles, blobToBase64, formatSize, KIND_ICON, PY_UPLOAD_DIR } from './files.js';
 import { renderMarkdown, escapeHtml } from './markdown.js';
 import { acquire, release } from './queue.js';
+import { TEAM_ROLES, suggestTeam, resolveTeam, runTeam } from './team.js';
 
 // Bump together with version.json on every release.
-const APP_VERSION = '2026.11.14-4';
+const APP_VERSION = '2026.11.14-5';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const NEW_TITLE = 'नई चैट';
@@ -21,6 +22,8 @@ const running = new Map(); // chatId -> { controller, phase: 'queued' | 'streami
 let batch = null; // { chatIds: [] }
 const multiDraft = { tasks: '', prefix: '', targets: [] };
 let editingConnId = null;
+let teamDraft = null;
+let editingTeamId = null;
 let pendingFiles = []; // attachments picked for the next message
 let deferredInstall = null;
 let installed = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
@@ -123,6 +126,11 @@ function renderTopbar() {
   chip.hidden = false;
   const chat = current();
   $('#topTitle').textContent = chat && chat.title !== NEW_TITLE ? chat.title : 'Rea Studio';
+  if (chat?.team) {
+    chip.textContent = '✦ तीन AI · साथ';
+    chip.title = 'ChatGPT + Gemini + Claude · टीम सेटिंग्स';
+    return;
+  }
   const c = chat ? conn(chat.connectionId) : defaultConn();
   const model = chat ? chat.model : c?.defaultModel;
   chip.textContent = model || 'मॉडल चुनें';
@@ -144,7 +152,7 @@ function renderChatList() {
     const active = c.id === currentId && view === 'chat' ? ' active' : '';
     const id = escapeHtml(c.id);
     return `<li class="chat-item${active}">
-      <button type="button" class="chat-open" data-action="open-chat" data-id="${id}">${dot}<span class="chat-name">${escapeHtml(c.title)}</span></button>
+      <button type="button" class="chat-open" data-action="open-chat" data-id="${id}">${dot}<span class="chat-name">${c.team ? '✦ ' : ''}${escapeHtml(c.title)}</span></button>
       <button type="button" class="icon-btn small" data-action="delete-chat" data-id="${id}" aria-label="चैट हटाएँ">🗑</button>
     </li>`;
   }).join('');
@@ -154,9 +162,14 @@ function renderChatList() {
 
 function welcomeHtml() {
   const has = settings.connections.length > 0;
+  if (current()?.team) return `<div class="welcome team-welcome">
+    <div class="team-orbit" aria-hidden="true">✦</div><h1>तीन ताकतें। एक साझा जवाब।</h1>
+    <p>ChatGPT · Gemini · Claude</p><p class="hint">अपना विषय लिखें या फ़ाइल जोड़ें। तीनों इसी प्रोजेक्ट की बातचीत देखकर साथ काम करेंगे।</p>
+    <button type="button" class="btn" data-action="open-model">टीम और प्रोजेक्ट के निर्देश</button></div>`;
   return `<div class="welcome">
     <img src="icons/icon.svg" alt="" width="64" height="64">
     <h1>चलो काम शुरू करते हैं</h1>
+    <button type="button" class="btn team-entry" data-action="new-team">✦ ChatGPT + Gemini + Claude</button>
     ${has ? '' : '<button type="button" class="btn primary" data-action="add-conn-direct">+ API जोड़ें</button>'}
     <button type="button" class="btn install-btn" data-action="install"${installed ? ' hidden' : ''}>📲 ऐप इंस्टॉल करें</button>
   </div>`;
@@ -198,8 +211,21 @@ function messageHtml(chat, m, i) {
       (isLast ? `<button type="button" data-action="retry" data-i="${i}">↻ फिर से</button>` : '') +
       '</div>';
   }
-  return `<div class="msg assistant" data-i="${i}"><div class="meta">${escapeHtml(m.model || chat.model || '')}</div>` +
-    `<div class="content md">${body}</div>${extra}${actions}</div>`;
+  return `<div class="msg assistant" data-i="${i}"><div class="meta">${escapeHtml(m.teamRuns ? '✦ साझा जवाब' : m.model || chat.model || '')}</div>` +
+    `${m.teamRuns ? teamProgressHtml(m, i) : ''}<div class="content md">${body}</div>${extra}${actions}</div>`;
+}
+
+function teamProgressHtml(m, i) {
+  const labels = { queued: 'कतार में', working: 'काम कर रहा है', done: 'योगदान तैयार', error: 'त्रुटि', stopped: 'रुका' };
+  const phase = { drafts: 'तीनों आपके विषय पर काम कर रहे हैं', synthesis: 'योगदान मिलाकर साझा जवाब बन रहा है', done: 'साझा जवाब तैयार', stopped: 'काम रुक गया', error: 'साझा जवाब पूरा नहीं हुआ' };
+  const completed = m.teamRuns.filter(r => r?.status === 'done').length;
+  return `<div class="team-progress"><div class="team-status">${phase[m.teamPhase] || 'टीम तैयारी कर रही है'} · ${completed}/3 योगदान</div>
+    <div class="team-badges">${m.teamRuns.map(r => `<span class="team-badge ${escapeHtml(r.status)}"><strong>${escapeHtml(r.label)}</strong><span>${labels[r.status] || 'तैयारी'}</span></span>`).join('')}</div>
+    <details class="team-contributions" data-mi="${i}"${m.teamOpen ? ' open' : ''}><summary>तीनों का योगदान देखें</summary>
+    ${m.teamRuns.map(r => `<article class="team-contribution"><h3>${escapeHtml(r.label)} <small>${escapeHtml(r.model)}</small></h3>
+      ${r.error ? `<p class="err-box">${escapeHtml(r.error)}</p>` : ''}${r.notice ? `<p class="hint">${escapeHtml(r.notice)}</p>` : ''}
+      <div class="md">${renderMarkdown(r.text || 'अभी योगदान नहीं आया।')}</div>
+      ${(r.steps || []).map(s => `<details><summary>🛠 ${escapeHtml(s.name)} · ${escapeHtml(s.status)}</summary><pre class="team-tool-output">${escapeHtml(s.output)}</pre></details>`).join('')}</article>`).join('')}</details></div>`;
 }
 
 function attachmentHtml(a) {
@@ -236,9 +262,9 @@ async function onFilesPicked(list) {
 // Turns chat messages into model history, loading uploaded files from the
 // device: photos go to the model as images, PDFs as documents (Anthropic
 // format), small text files inline; everything else is handed to Python.
-async function buildHistory(messages, c) {
+async function buildHistory(messages, c, toolConfig = settings) {
   const anth = c.format === 'anthropic';
-  const py = enabledTools(settings).some(t => t.name === 'run_python');
+  const py = enabledTools(toolConfig).some(t => t.name === 'run_python');
   const out = [];
   for (const m of messages) {
     if (m.role !== 'user' || !m.attachments?.length) { out.push({ role: m.role, content: m.content }); continue; }
@@ -360,6 +386,7 @@ function refreshStatus(chat) {
 // ---------- generation ----------
 
 async function runGeneration(chat) {
+  if (chat.team) return runTeamGeneration(chat);
   const c = conn(chat.connectionId);
   const msg = lastMsg(chat);
   const controller = new AbortController();
@@ -455,6 +482,41 @@ async function runGeneration(chat) {
   }
 }
 
+async function runTeamGeneration(chat) {
+  const msg = lastMsg(chat);
+  const controller = new AbortController();
+  running.set(chat.id, { controller, phase: 'streaming' });
+  refreshStatus(chat);
+  // Freeze the inputs for this run while other chats/settings remain usable.
+  const sharedSettings = structuredClone(settings);
+  const sharedMessages = structuredClone(chat.messages.slice(0, -1));
+  const sharedSystem = chat.system || sharedSettings.systemPrompt || '';
+  try {
+    const members = resolveTeam(chat.team, sharedSettings.connections);
+    msg.teamRuns = [];
+    const result = await runTeam({ members, coordinator: chat.team.coordinator,
+      system: [sharedSystem, toolSystemPrompt(sharedSettings)].filter(Boolean).join('\n\n'),
+      getHistory: c => buildHistory(sharedMessages, c, sharedSettings),
+      tools: enabledTools(sharedSettings), signal: controller.signal,
+      executeTool: (name, args, signal) => runTool(name, args, sharedSettings, signal, { files: () => chatFiles({ messages: sharedMessages }) }),
+      onMember: (i, data) => { msg.teamRuns[i] = data; markDirty(chat.id); persistChats(); },
+      onPhase: phase => { msg.teamPhase = phase; markDirty(chat.id); },
+      onText: text => { msg.content += text; markDirty(chat.id); persistChats(); },
+    });
+    msg.teamSummary = result;
+    msg.stopReason = result.stopReason;
+  } catch (error) {
+    msg.teamPhase = controller.signal.aborted ? 'stopped' : 'error';
+    if (controller.signal.aborted) msg.stopped = true;
+    else msg.error = friendlyError(error);
+  } finally {
+    delete msg.pending;
+    running.delete(chat.id);
+    touch(chat); persistChats(true); refreshStatus(chat);
+    if (pendingUpdate) setTimeout(() => applyUpdate(pendingUpdate), 1500);
+  }
+}
+
 function startAssistant(chat) {
   chat.messages.push({ role: 'assistant', content: '', pending: true, model: chat.model, ts: Date.now() });
   touch(chat);
@@ -479,12 +541,15 @@ function onSubmit(e) {
     return;
   }
   if (!chat) { chat = createChat(); currentId = chat.id; }
-  if (!conn(chat.connectionId)) {
+  if (chat.team) {
+    try { resolveTeam(chat.team, settings.connections); }
+    catch (error) { toast(error.message); openTeamDialog(chat); return; }
+  } else if (!conn(chat.connectionId)) {
     const d = defaultConn();
     chat.connectionId = d.id;
     if (!chat.model) chat.model = d.defaultModel || '';
   }
-  if (!chat.model) {
+  if (!chat.team && !chat.model) {
     toast('पहले मॉडल चुनें।');
     openModelDialog();
     return;
@@ -525,6 +590,67 @@ function deleteChat(id) {
 
 // ---------- model dialog ----------
 
+function readTeamDraft() {
+  if (!teamDraft) return;
+  teamDraft.members = TEAM_ROLES.map((r, i) => ({ id: r.id, label: r.label,
+    connectionId: $(`#tdConn${i}`).value, model: $(`#tdModel${i}`).value.trim() }));
+}
+
+function renderTeamMembers() {
+  $('#teamMembers').innerHTML = teamDraft.members.map((m, i) => {
+    const c = conn(m.connectionId);
+    return `<fieldset class="team-member"><legend>${TEAM_ROLES[i].label}</legend>
+      <label>API कनेक्शन<select id="tdConn${i}" data-team-conn="${i}" required>
+        <option value="">कनेक्शन चुनें</option>${settings.connections.map(c => `<option value="${escapeHtml(c.id)}"${c.id === m.connectionId ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}</select></label>
+      <label>मॉडल<input id="tdModel${i}" list="tdModels${i}" value="${escapeHtml(m.model)}" required autocomplete="off" spellcheck="false" placeholder="${TEAM_ROLES[i].label} मॉडल का नाम"></label>
+      <datalist id="tdModels${i}">${(c?.models || []).map(model => `<option value="${escapeHtml(model)}"></option>`).join('')}</datalist>
+      <button type="button" class="btn small" data-action="team-fetch" data-i="${i}">↻ मॉडल लिस्ट लाओ</button></fieldset>`;
+  }).join('');
+}
+
+function openTeamDialog(chat = null) {
+  if (chat && running.has(chat.id)) { toast('टीम बदलने से पहले चल रहा जवाब रोकें।'); return; }
+  editingTeamId = chat?.id || null;
+  teamDraft = structuredClone(chat?.team || { members: suggestTeam(settings.connections), coordinator: 2 });
+  $('#tdTitle').value = chat?.title || '';
+  $('#tdSystem').value = chat?.system || '';
+  $('#tdCoordinator').value = String(teamDraft.coordinator ?? 2);
+  $('#tdStatus').textContent = settings.connections.length ? '' : 'शुरू करने के लिए नीचे API कनेक्शन जोड़ें।';
+  renderTeamMembers();
+  $('#teamDialog').showModal();
+}
+
+async function fetchTeamModels(i, button) {
+  const c = conn($(`#tdConn${i}`).value);
+  if (!c) { $('#tdStatus').textContent = 'पहले API कनेक्शन चुनें।'; return; }
+  button.disabled = true;
+  $('#tdStatus').textContent = 'मॉडल लिस्ट आ रही है…';
+  try {
+    const models = await listModels(c, AbortSignal.timeout(30000));
+    c.models = models; persistSettings();
+    // A fetch for an old selection must not overwrite a newly chosen API.
+    if ($(`#tdConn${i}`).value !== c.id) return;
+    $(`#tdModels${i}`).innerHTML = models.map(m => `<option value="${escapeHtml(m)}"></option>`).join('');
+    if (!$(`#tdModel${i}`).value) $(`#tdModel${i}`).value = models.find(m => TEAM_ROLES[i].match.test(m)) || '';
+    $('#tdStatus').textContent = `${models.length} मॉडल मिले। मॉडल वाले खाने से चुनें।`;
+  } catch (error) { $('#tdStatus').textContent = friendlyError(error).title; }
+  finally { button.disabled = false; }
+}
+
+function saveTeamDialog(e) {
+  e.preventDefault(); readTeamDraft();
+  try { resolveTeam(teamDraft, settings.connections); }
+  catch (error) { $('#tdStatus').textContent = error.message; return; }
+  let chat = editingTeamId ? chatById(editingTeamId) : null;
+  if (editingTeamId && !chat) { $('#tdStatus').textContent = 'यह चैट हट चुकी है। नई टीम बनाएँ।'; return; }
+  if (!chat) chat = createChat();
+  chat.team = { members: structuredClone(teamDraft.members), coordinator: Number($('#tdCoordinator').value) };
+  chat.title = $('#tdTitle').value.trim() || 'साझा प्रोजेक्ट';
+  chat.system = $('#tdSystem').value.trim();
+  currentId = chat.id; touch(chat); persistChats(true);
+  $('#teamDialog').close(); show('chat'); $('#input').focus();
+}
+
 function fillPills(container, models, onPick) {
   container.innerHTML = models.slice(0, 80).map(m => `<button type="button" class="pill" data-model="${escapeHtml(m)}">${escapeHtml(m)}</button>`).join('');
   container.onclick = e => {
@@ -545,6 +671,7 @@ function syncModelDialogModels() {
 }
 
 function openModelDialog() {
+  if (current()?.team) { openTeamDialog(current()); return; }
   if (!settings.connections.length) {
     toast('पहले एक API जोड़ें।');
     openConnDialog(null);
@@ -772,6 +899,12 @@ function saveConnDialog(e) {
   if (view === 'settings') renderSettings();
   if (view === 'multi') renderMulti();
   if (view === 'chat') renderChat();
+  if ($('#teamDialog').open && teamDraft) {
+    readTeamDraft();
+    const suggestions = suggestTeam(settings.connections);
+    teamDraft.members = teamDraft.members.map((m, i) => m.connectionId ? m : suggestions[i]);
+    renderTeamMembers();
+  }
   renderTopbar();
 }
 
@@ -999,7 +1132,7 @@ function safeToReload() {
 }
 
 const APP_FILES = ['./', 'index.html', 'css/app.css', 'js/app.js', 'js/store.js', 'js/providers.js',
-  'js/markdown.js', 'js/queue.js', 'js/tools.js', 'js/files.js', 'js/run-worker.js', 'js/py-worker.js', 'manifest.webmanifest', 'sw.js'];
+  'js/markdown.js', 'js/queue.js', 'js/team.js', 'js/tools.js', 'js/files.js', 'js/run-worker.js', 'js/py-worker.js', 'manifest.webmanifest', 'sw.js'];
 
 let updating = false;
 async function applyUpdate(version) {
@@ -1096,6 +1229,9 @@ function onClick(e) {
   if (!b) return;
   const id = b.dataset.id;
   switch (b.dataset.action) {
+    case 'new-team': closeDrawer(); openTeamDialog(); break;
+    case 'team-add-api': readTeamDraft(); openConnDialog(null); break;
+    case 'team-fetch': fetchTeamModels(Number(b.dataset.i), b); break;
     case 'open-drawer': openDrawer(); break;
     case 'close-drawer': closeDrawer(); break;
     case 'new-chat': {
@@ -1217,6 +1353,11 @@ function init() {
   document.addEventListener('click', onClick);
   document.addEventListener('toggle', e => {
     const d = e.target;
+    if (d instanceof HTMLDetailsElement && d.classList.contains('team-contributions')) {
+      const message = current()?.messages[Number(d.dataset.mi)];
+      if (message) message.teamOpen = d.open;
+      return;
+    }
     if (!(d instanceof HTMLDetailsElement) || !d.classList.contains('tool')) return;
     const part = current()?.messages[Number(d.dataset.mi)]?.parts?.[Number(d.dataset.pi)];
     if (part) part.open = d.open;
@@ -1236,6 +1377,15 @@ function init() {
     }
   });
   $('#modelForm').addEventListener('submit', saveModelDialog);
+  $('#teamForm').addEventListener('submit', saveTeamDialog);
+  $('#teamMembers').addEventListener('change', e => {
+    if (!e.target.matches('[data-team-conn]')) return;
+    readTeamDraft();
+    const i = Number(e.target.dataset.teamConn);
+    const c = conn(teamDraft.members[i].connectionId);
+    teamDraft.members[i].model = [c?.defaultModel, ...(c?.models || [])].find(m => m && TEAM_ROLES[i].match.test(m)) || '';
+    renderTeamMembers();
+  });
   $('#mdConn').addEventListener('change', () => {
     const c = conn($('#mdConn').value);
     $('#mdModel').value = c?.defaultModel || '';

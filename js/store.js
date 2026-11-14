@@ -46,6 +46,15 @@ export function loadChats() {
       if (m.pending) {
         delete m.pending;
         if (!m.content) m.stopped = true;
+        if (m.teamRuns) {
+          m.teamPhase = 'stopped';
+          m.stopped = true;
+          for (const r of m.teamRuns) {
+            if (!r) continue;
+            if (['queued', 'working'].includes(r.status)) r.status = 'stopped';
+            for (const s of r.steps || []) if (s.status === 'working') s.status = 'stopped';
+          }
+        }
       }
     }
   }

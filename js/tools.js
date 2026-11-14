@@ -190,6 +190,7 @@ async function readWebpage(args, t, signal) {
 // ---------- run code ----------
 
 function runInWorker(worker, code, timeoutMs, signal, files = []) {
+  signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
     const done = () => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); };
     const timer = setTimeout(() => { done(); reject(Object.assign(new Error(`समय सीमा (${timeoutMs / 1000} सेकंड) पार हो गई`), { kill: true })); }, timeoutMs);
@@ -221,7 +222,25 @@ async function runJavascript(args, signal) {
 let pyWorker = null;
 let pyStarted = false;
 let pySent = new Set(); // uploaded files already copied into the current Python worker
-async function runPython(args, signal, ctx) {
+let pythonQueue = Promise.resolve();
+function runPython(args, signal, ctx) {
+  // Team members and ordinary chats share one Python worker. Never replace
+  // its message handler while another run is waiting for a result.
+  const job = pythonQueue.then(() => {
+    signal?.throwIfAborted();
+    return runPythonExclusive(args, signal, ctx);
+  });
+  pythonQueue = job.catch(() => {});
+  if (!signal) return job;
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason || new DOMException('Aborted', 'AbortError'));
+    if (signal.aborted) { abort(); return; }
+    signal.addEventListener('abort', abort, { once: true });
+    job.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+  });
+}
+
+async function runPythonExclusive(args, signal, ctx) {
   // Files the user uploaded in this chat are copied into Python's file system.
   if (!pyWorker) {
     pyWorker = new Worker(new URL('./py-worker.js', import.meta.url), { type: 'module' });
