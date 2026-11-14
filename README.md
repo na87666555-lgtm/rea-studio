@@ -16,6 +16,12 @@
   - ▶ **JavaScript** और 🐍 **Python** चलाना: Python (Pyodide) पहली बार लगभग 10 MB download करता है। कोड फ़ोन में ही एक अलग worker में चलता है, जहाँ से API keys नहीं पढ़ी जा सकतीं।
   - हर टूल का कदम चैट में दिखता है, और उसे दबाने पर कोड और नतीजा खुल जाता है। सेटिंग्स में हर टूल को अलग से बंद किया जा सकता है।
   - जिस मॉडल या provider में टूल्स नहीं चलते, वहाँ ऐप अपने आप बिना टूल्स के जवाब ले लेता है।
+- **📎 फ़ोटो और फ़ाइलें:** संदेश लिखने की जगह के बगल वाला ＋ दबाकर फ़ोटो, PDF, text/CSV/code फ़ाइल, MP3 या वीडियो जोड़ें (हर फ़ाइल 50 MB तक)।
+  - फ़ोटो सीधे मॉडल को जाती है, ताकि वह उसे देख सके (Claude जैसे vision मॉडल के लिए)।
+  - text वाली फ़ाइलों का content मॉडल पढ़ता है।
+  - PDF Anthropic-जैसे API में सीधे जाती है।
+  - MP3, वीडियो और बाकी फ़ाइलें Python टूल को `/home/pyodide/uploads/` में मिलती हैं।
+  - फ़ाइलें फ़ोन के ब्राउज़र storage (IndexedDB) में रहती हैं, और चैट हटाने पर वे भी हट जाती हैं।
 - **फ़ोन पर install:** होम स्क्रीन पर ऐप की तरह लगता है, और बिना इंटरनेट के भी खुल जाता है (जवाब के लिए इंटरनेट चाहिए)।
 - **Keys आपके फ़ोन में:** keys सिर्फ इसी फ़ोन के ब्राउज़र में सेव रहती हैं। कोई बीच का server नहीं है।
 
@@ -55,6 +61,7 @@
 | `js/app.js` | चैट, सेटिंग्स, एक साथ कई काम |
 | `js/providers.js` | OpenAI-जैसे और Anthropic-जैसे API से streaming बातचीत |
 | `js/tools.js`, `js/run-worker.js`, `js/py-worker.js` | वेब खोज, पेज पढ़ना, JavaScript और Python चलाना |
+| `js/files.js` | फ़ोटो और फ़ाइलें जोड़ना और सेव करना |
 | `js/queue.js` | हर API के लिए एक साथ चलने वाली requests की सीमा |
 | `js/markdown.js` | जवाबों का सुरक्षित Markdown रूप (HTML/script नहीं चलने देता) |
 | `js/store.js` | फ़ोन के ब्राउज़र में सेव करना |
@@ -68,4 +75,4 @@
 
 ## English summary
 
-Rea Studio is a dependency-free, installable web app (PWA) for chatting with any AI provider using your own API key. It speaks both the OpenAI-style `/chat/completions` and the Anthropic-style `/v1/messages` streaming formats, so it works with Anthropic, OpenAI, OpenRouter, Gemini, Groq, DeepSeek, Mistral, xAI, Together, Coarena, or any compatible endpoint. The model can call tools while answering: web search (Wikipedia without a key, or Tavily/Jina with one), reading a web page (via r.jina.ai), and running JavaScript or Python (Pyodide) in sandboxed workers that can't read the stored keys; tool calls stream for both API formats, and providers that reject tools fall back to plain chat. Many chats can stream at once, and the multi-task screen fans a list of tasks out across one or more models, with a per-connection concurrency limit. Keys stay in the browser's `localStorage` and are sent only to the configured base URL. There is no build step: serve the repository root as static files (for example with GitHub Pages).
+Rea Studio is a dependency-free, installable web app (PWA) for chatting with any AI provider using your own API key. It speaks both the OpenAI-style `/chat/completions` and the Anthropic-style `/v1/messages` streaming formats, so it works with Anthropic, OpenAI, OpenRouter, Gemini, Groq, DeepSeek, Mistral, xAI, Together, Coarena, or any compatible endpoint. The model can call tools while answering: web search (Wikipedia without a key, or Tavily/Jina with one), reading a web page (via r.jina.ai), and running JavaScript or Python (Pyodide) in sandboxed workers that can't read the stored keys; tool calls stream for both API formats, and providers that reject tools fall back to plain chat. Photos, PDFs, text files, audio and video can be attached: photos go to the model as images (resized JPEG), PDFs as document blocks on Anthropic-style APIs, small text files inline, and everything is available to the Python tool under /home/pyodide/uploads; files are kept in IndexedDB. Many chats can stream at once, and the multi-task screen fans a list of tasks out across one or more models, with a per-connection concurrency limit. Keys stay in the browser's `localStorage` and are sent only to the configured base URL. There is no build step: serve the repository root as static files (for example with GitHub Pages).

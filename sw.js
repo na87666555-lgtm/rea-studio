@@ -6,7 +6,7 @@
 // does NOT change with app releases; change it only when this file's logic
 // changes. A new service worker waits until the app is closed before taking
 // over (no skipWaiting/claim), so it never swaps in during a page load.
-const CACHE = 'rea-studio-sw3';
+const CACHE = 'rea-studio-sw4';
 const ASSETS = [
   './',
   './index.html',
@@ -17,6 +17,7 @@ const ASSETS = [
   './js/markdown.js',
   './js/queue.js',
   './js/tools.js',
+  './js/files.js',
   './js/run-worker.js',
   './js/py-worker.js',
   './manifest.webmanifest',

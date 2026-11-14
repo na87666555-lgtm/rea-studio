@@ -21,10 +21,20 @@ function load() {
   return ready;
 }
 
+const UPLOAD_DIR = '/home/pyodide/uploads';
+const written = new Set();
+
 self.onmessage = async e => {
   out = [];
   try {
     const py = await load();
+    // Copy the chat's uploaded files into Python's file system (once each).
+    for (const f of e.data.files || []) {
+      if (written.has(f.id)) continue;
+      py.FS.mkdirTree(UPLOAD_DIR);
+      py.FS.writeFile(`${UPLOAD_DIR}/${f.name}`, new Uint8Array(f.buf));
+      written.add(f.id);
+    }
     await py.loadPackagesFromImports(e.data.code, { messageCallback: () => {} });
     const result = await py.runPythonAsync(e.data.code);
     let text = null;

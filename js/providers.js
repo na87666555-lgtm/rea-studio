@@ -202,17 +202,48 @@ async function* sseEvents(response) {
 
 // Merge consecutive same-role turns and drop empty ones, so a failed reply
 // in the middle of a chat doesn't break providers that require alternation.
+// History items are { role, content, images?, docs? }; images and docs are
+// [{ mediaType, data (base64) }] taken from uploaded files.
 function normalize(messages) {
   const out = [];
   for (const m of messages) {
     if (m.role !== 'user' && m.role !== 'assistant') continue;
-    if (!m.content || !m.content.trim()) continue;
+    const images = m.images || [];
+    const docs = m.docs || [];
+    if ((!m.content || !m.content.trim()) && !images.length && !docs.length) continue;
     const last = out[out.length - 1];
-    if (last && last.role === m.role) last.content += '\n\n' + m.content;
-    else out.push({ role: m.role, content: m.content });
+    if (last && last.role === m.role) {
+      last.content = [last.content, m.content].filter(Boolean).join('\n\n');
+      last.images.push(...images);
+      last.docs.push(...docs);
+    } else out.push({ role: m.role, content: m.content || '', images: [...images], docs: [...docs] });
   }
   while (out.length && out[0].role !== 'user') out.shift();
   return out;
+}
+
+// Converts normalized history into each API's message format.
+function toWire(msgs, anth) {
+  return msgs.map(m => {
+    if (!m.images.length && !m.docs.length) return { role: m.role, content: m.content };
+    if (anth) {
+      return {
+        role: m.role,
+        content: [
+          ...m.docs.map(d => ({ type: 'document', source: { type: 'base64', media_type: d.mediaType, data: d.data } })),
+          ...m.images.map(i => ({ type: 'image', source: { type: 'base64', media_type: i.mediaType, data: i.data } })),
+          { type: 'text', text: m.content || '(attached files)' },
+        ],
+      };
+    }
+    return {
+      role: m.role,
+      content: [
+        { type: 'text', text: m.content || '(attached files)' },
+        ...m.images.map(i => ({ type: 'image_url', image_url: { url: `data:${i.mediaType};base64,${i.data}` } })),
+      ],
+    };
+  });
 }
 
 function parseArgs(s) {
@@ -256,10 +287,10 @@ function fromJson(conn, j) {
 // this same reply. Returns the text, any tool calls the model made, and the
 // assistant message to append to the trail before sending tool results.
 export async function streamTurn({ conn, model, system, history, trail = [], tools = null, signal, onText }) {
-  const msgs = normalize(history);
+  const anth = conn.format === 'anthropic';
+  const msgs = toWire(normalize(history), anth);
   if (!msgs.length) throw new ApiError('भेजने के लिए कोई संदेश नहीं है।', 0, '');
   const sys = (system || '').trim();
-  const anth = conn.format === 'anthropic';
   let body;
   if (anth) {
     body = { model, max_tokens: Number(conn.maxTokens) || 16000, messages: msgs.concat(trail), stream: true };

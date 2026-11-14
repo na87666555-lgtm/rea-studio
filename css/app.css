@@ -331,3 +331,26 @@ details.tool summary::-webkit-details-marker { display: none; }
 .tool-toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
 label.check { flex-direction: row; align-items: center; gap: 8px; color: var(--text); font-size: 15px; }
 input[type=checkbox] { width: 20px; height: 20px; padding: 0; flex-shrink: 0; accent-color: var(--accent); }
+
+/* attachments */
+.composer { flex-direction: column; align-items: stretch; }
+.composer-row { display: flex; align-items: flex-end; gap: 8px; }
+.attach-btn {
+  width: 44px; height: 44px; flex-shrink: 0; border-radius: 50%; border: 1px solid var(--border);
+  background: var(--panel-2); color: var(--text); font-size: 22px; line-height: 1; cursor: pointer;
+}
+.attach-row { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+.att-chip {
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; max-width: 220px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 4px 6px 4px 4px; font-size: 13px;
+}
+.att-chip img { width: 36px; height: 36px; object-fit: cover; border-radius: 6px; }
+.att-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.att-x { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 14px; padding: 2px 4px; }
+.msg.user { flex-direction: column; align-items: flex-end; gap: 4px; }
+.msg-atts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; max-width: 88%; }
+.att-img { max-width: 180px; max-height: 180px; border-radius: 12px; border: 1px solid var(--border); display: block; }
+.att-file {
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 6px 10px;
+  font-size: 13px; overflow-wrap: anywhere;
+}

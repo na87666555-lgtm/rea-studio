@@ -43,8 +43,13 @@
       <section id="chatView" class="view chat-view">
         <div id="messages" class="messages" aria-live="polite"></div>
         <form id="composer" class="composer">
-          <textarea id="input" rows="1" placeholder="संदेश लिखें…" enterkeyhint="enter" aria-label="संदेश"></textarea>
-          <button id="sendBtn" class="send-btn" type="submit" aria-label="भेजें">➤</button>
+          <div id="attachRow" class="attach-row" hidden></div>
+          <div class="composer-row">
+            <button type="button" class="attach-btn" data-action="attach" aria-label="फ़ोटो या फ़ाइल जोड़ें">＋</button>
+            <textarea id="input" rows="1" placeholder="संदेश लिखें…" enterkeyhint="enter" aria-label="संदेश"></textarea>
+            <button id="sendBtn" class="send-btn" type="submit" aria-label="भेजें">➤</button>
+          </div>
+          <input type="file" id="fileInput" multiple hidden>
         </form>
       </section>
 

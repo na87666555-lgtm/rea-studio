@@ -41,7 +41,7 @@ export const TOOL_DEFS = {
     label: 'Python चलाया',
     icon: '🐍',
     setting: 'python',
-    description: 'Run Python 3 (Pyodide, in the browser) to calculate, analyse data or test code. Use print() for output; the last expression is also returned. Common packages like numpy and pandas load automatically. Variables persist between runs. The first run downloads Python (about 10 MB).',
+    description: 'Run Python 3 (Pyodide, in the browser) to calculate, analyse data, process files or test code. Use print() for output; the last expression is also returned. Packages from the Pyodide distribution (numpy, pandas, matplotlib, Pillow, etc.) load automatically on import; pure-Python packages from PyPI can be installed with `import micropip; await micropip.install("name")`. Files the user uploaded in this chat are in /home/pyodide/uploads/. There is no ffmpeg or system shell. Variables persist between runs. The first run downloads Python (about 10 MB).',
     parameters: {
       type: 'object',
       properties: { code: { type: 'string', description: 'Python source.' } },
@@ -189,7 +189,7 @@ async function readWebpage(args, t, signal) {
 
 // ---------- run code ----------
 
-function runInWorker(worker, code, timeoutMs, signal) {
+function runInWorker(worker, code, timeoutMs, signal, files = []) {
   return new Promise((resolve, reject) => {
     const done = () => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); };
     const timer = setTimeout(() => { done(); reject(Object.assign(new Error(`समय सीमा (${timeoutMs / 1000} सेकंड) पार हो गई`), { kill: true })); }, timeoutMs);
@@ -197,7 +197,7 @@ function runInWorker(worker, code, timeoutMs, signal) {
     signal?.addEventListener('abort', onAbort, { once: true });
     worker.onmessage = e => { done(); resolve(e.data); };
     worker.onerror = e => { done(); reject(Object.assign(new Error(e.message || 'worker error'), { kill: true })); };
-    worker.postMessage({ code });
+    worker.postMessage({ code, files }, files.map(f => f.buf));
   });
 }
 
@@ -220,14 +220,23 @@ async function runJavascript(args, signal) {
 
 let pyWorker = null;
 let pyStarted = false;
-async function runPython(args, signal) {
+let pySent = new Set(); // uploaded files already copied into the current Python worker
+async function runPython(args, signal, ctx) {
+  // Files the user uploaded in this chat are copied into Python's file system.
   if (!pyWorker) {
     pyWorker = new Worker(new URL('./py-worker.js', import.meta.url), { type: 'module' });
     pyStarted = false;
+    pySent = new Set();
+  }
+  const files = [];
+  for (const f of (ctx && ctx.files ? await ctx.files() : [])) {
+    if (pySent.has(f.id)) continue;
+    files.push({ id: f.id, name: f.name, buf: await f.blob.arrayBuffer() });
+    pySent.add(f.id);
   }
   const timeout = pyStarted ? 60000 : 180000; // first run downloads Python
   try {
-    const r = await runInWorker(pyWorker, String(args.code || ''), timeout, signal);
+    const r = await runInWorker(pyWorker, String(args.code || ''), timeout, signal, files);
     pyStarted = true;
     return formatRun(r);
   } catch (e) {
@@ -244,7 +253,7 @@ export function toolLabel(name, args) {
   return { icon: d?.icon || '🛠', label: d?.label || name, detail: detail || '' };
 }
 
-export async function runTool(name, args, settings, signal) {
+export async function runTool(name, args, settings, signal, ctx) {
   const t = toolSettings(settings);
   const def = TOOL_DEFS[name];
   if (!def || !t.enabled || !t[def.setting]) return { ok: false, text: `Tool "${name}" is not available.` };
@@ -252,7 +261,7 @@ export async function runTool(name, args, settings, signal) {
     if (name === 'web_search') return { ok: true, text: await webSearch(args, t, signal) };
     if (name === 'read_webpage') return { ok: true, text: await readWebpage(args, t, signal) };
     if (name === 'run_javascript') return await runJavascript(args, signal);
-    if (name === 'run_python') return await runPython(args, signal);
+    if (name === 'run_python') return await runPython(args, signal, ctx);
   } catch (e) {
     if (e?.name === 'AbortError') throw e;
     const msg = e?.name === 'TypeError' ? `Network error (${e.message})` : e?.message || String(e);

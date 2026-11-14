@@ -1,11 +1,12 @@
 import { loadSettings, saveSettings, loadChats, saveChats, clearAll, uid } from './store.js';
 import { PRESETS, FORMATS, ApiError, streamChat, streamTurn, toolResultMessages, listModels, friendlyError, presetForKey, keyMismatch } from './providers.js';
 import { enabledTools, runTool, toolSystemPrompt, toolLabel, toolSettings } from './tools.js';
+import { addAttachment, getFile, deleteFiles, clearFiles, blobToBase64, formatSize, KIND_ICON, PY_UPLOAD_DIR } from './files.js';
 import { renderMarkdown, escapeHtml } from './markdown.js';
 import { acquire, release } from './queue.js';
 
 // Bump together with version.json on every release.
-const APP_VERSION = '2026.11.14-3';
+const APP_VERSION = '2026.11.14-4';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const NEW_TITLE = 'नई चैट';
@@ -20,6 +21,7 @@ const running = new Map(); // chatId -> { controller, phase: 'queued' | 'streami
 let batch = null; // { chatIds: [] }
 const multiDraft = { tasks: '', prefix: '', targets: [] };
 let editingConnId = null;
+let pendingFiles = []; // attachments picked for the next message
 let deferredInstall = null;
 let installed = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 
@@ -162,7 +164,9 @@ function welcomeHtml() {
 
 function messageHtml(chat, m, i) {
   if (m.role === 'user') {
-    return `<div class="msg user" data-i="${i}"><div class="bubble">${escapeHtml(m.content).replace(/\n/g, '<br>')}</div></div>`;
+    const atts = (m.attachments || []).map(attachmentHtml).join('');
+    const text = m.content ? `<div class="bubble">${escapeHtml(m.content).replace(/\n/g, '<br>')}</div>` : '';
+    return `<div class="msg user" data-i="${i}">${atts ? `<div class="msg-atts">${atts}</div>` : ''}${text}</div>`;
   }
   const r = running.get(chat.id);
   const isLast = i === chat.messages.length - 1;
@@ -196,6 +200,78 @@ function messageHtml(chat, m, i) {
   }
   return `<div class="msg assistant" data-i="${i}"><div class="meta">${escapeHtml(m.model || chat.model || '')}</div>` +
     `<div class="content md">${body}</div>${extra}${actions}</div>`;
+}
+
+function attachmentHtml(a) {
+  if (a.kind === 'image' && a.thumb && /^data:image\/jpeg;base64,/.test(a.thumb)) {
+    return `<img class="att-img" src="${a.thumb}" alt="${escapeHtml(a.name)}">`;
+  }
+  return `<span class="att-file">${KIND_ICON[a.kind] || '📎'} ${escapeHtml(a.name)} <span class="muted">· ${formatSize(a.size)}</span></span>`;
+}
+
+function renderAttachRow() {
+  const row = $('#attachRow');
+  row.hidden = !pendingFiles.length;
+  row.innerHTML = pendingFiles.map((a, i) => `<span class="att-chip">${a.loading ? '<span class="tool-spin"></span>' : a.kind === 'image' && a.thumb ? `<img src="${a.thumb}" alt="">` : `<span>${KIND_ICON[a.kind] || '📎'}</span>`}` +
+    `<span class="att-name">${escapeHtml(a.name)}</span>` +
+    (a.loading ? '' : `<button type="button" class="att-x" data-action="remove-file" data-i="${i}" aria-label="हटाएँ">✕</button>`) + '</span>').join('');
+}
+
+async function onFilesPicked(list) {
+  for (const file of list) {
+    const placeholder = { id: uid(), name: file.name, kind: 'other', loading: true };
+    pendingFiles.push(placeholder);
+    renderAttachRow();
+    try {
+      const att = await addAttachment(file, placeholder.id);
+      pendingFiles[pendingFiles.indexOf(placeholder)] = att;
+    } catch (e) {
+      pendingFiles = pendingFiles.filter(x => x !== placeholder);
+      toast(e?.message || 'फ़ाइल नहीं जुड़ पाई।');
+    }
+    renderAttachRow();
+  }
+}
+
+// Turns chat messages into model history, loading uploaded files from the
+// device: photos go to the model as images, PDFs as documents (Anthropic
+// format), small text files inline; everything else is handed to Python.
+async function buildHistory(messages, c) {
+  const anth = c.format === 'anthropic';
+  const py = enabledTools(settings).some(t => t.name === 'run_python');
+  const out = [];
+  for (const m of messages) {
+    if (m.role !== 'user' || !m.attachments?.length) { out.push({ role: m.role, content: m.content }); continue; }
+    const images = [];
+    const docs = [];
+    const notes = [];
+    for (const a of m.attachments) {
+      const blob = await getFile(a.id).catch(() => null);
+      if (!blob) { notes.push(`[The file "${a.name}" is no longer stored on this device.]`); continue; }
+      if (a.kind === 'image') images.push({ mediaType: a.type || 'image/jpeg', data: await blobToBase64(blob) });
+      else if (a.kind === 'pdf' && anth && blob.size <= 20 * 1024 * 1024) docs.push({ mediaType: 'application/pdf', data: await blobToBase64(blob) });
+      else if (a.kind === 'text' && blob.size <= 300 * 1024) notes.push(`[File: ${a.name}]\n\`\`\`\n${(await blob.text()).slice(0, 100000)}\n\`\`\``);
+      else if (py) notes.push(`[Attached file: ${a.name} (${a.type || a.kind}, ${formatSize(a.size)}). Use run_python to work with it; it is at ${PY_UPLOAD_DIR}/${a.name}.]`);
+      else notes.push(`[Attached file: ${a.name} (${a.type || a.kind}, ${formatSize(a.size)}). This model can't open it directly; the Python tool is off.]`);
+    }
+    out.push({ role: 'user', content: [m.content, ...notes].filter(Boolean).join('\n\n'), images, docs });
+  }
+  return out;
+}
+
+async function chatFiles(chat) {
+  const list = [];
+  for (const m of chat.messages) {
+    for (const a of m.attachments || []) {
+      const blob = await getFile(a.id).catch(() => null);
+      if (blob) list.push({ id: a.id, name: a.name, blob });
+    }
+  }
+  return list;
+}
+
+function chatFileIds(list) {
+  return list.flatMap(c => c.messages.flatMap(m => (m.attachments || []).map(a => a.id)));
 }
 
 function toolPartHtml(p, mi, pi) {
@@ -302,6 +378,7 @@ async function runGeneration(chat) {
     let useTools = tools.length > 0;
     const baseSystem = chat.system || settings.systemPrompt || '';
     const trail = [];
+    const history = await buildHistory(chat.messages.slice(0, -1), c);
     msg.parts = [];
     const addText = t => {
       const last = msg.parts[msg.parts.length - 1];
@@ -323,7 +400,7 @@ async function runGeneration(chat) {
           conn: c,
           model: chat.model,
           system,
-          history: chat.messages.slice(0, -1),
+          history,
           trail,
           tools: useTools ? tools : null,
           signal: controller.signal,
@@ -347,7 +424,7 @@ async function runGeneration(chat) {
         const step = { type: 'tool', name: call.name, args: call.args || {}, status: 'running' };
         msg.parts.push(step);
         markDirty(chat.id);
-        const out = await runTool(call.name, call.args || {}, settings, controller.signal);
+        const out = await runTool(call.name, call.args || {}, settings, controller.signal, { files: () => chatFiles(chat) });
         step.status = out.ok ? 'done' : 'error';
         step.output = out.text.length > 4000 ? out.text.slice(0, 4000) + '…' : out.text;
         results.push({ id: call.id, ok: out.ok, text: out.text });
@@ -394,7 +471,8 @@ function onSubmit(e) {
   }
   const input = $('#input');
   const text = input.value.trim();
-  if (!text) return;
+  if (pendingFiles.some(a => a.loading)) { toast('फ़ाइल तैयार हो रही है, एक पल रुकें।'); return; }
+  if (!text && !pendingFiles.length) return;
   if (!settings.connections.length) {
     toast('पहले एक API जोड़ें।');
     openConnDialog(null);
@@ -413,8 +491,11 @@ function onSubmit(e) {
   }
   input.value = '';
   autosize();
-  chat.messages.push({ role: 'user', content: text, ts: Date.now() });
-  if (chat.title === NEW_TITLE) chat.title = makeTitle(text);
+  const attachments = pendingFiles;
+  pendingFiles = [];
+  renderAttachRow();
+  chat.messages.push({ role: 'user', content: text, ts: Date.now(), ...(attachments.length ? { attachments } : {}) });
+  if (chat.title === NEW_TITLE) chat.title = makeTitle(text || attachments.map(a => a.name).join(', '));
   startAssistant(chat);
   renderChatList();
 }
@@ -432,6 +513,7 @@ function deleteChat(id) {
   if (!chat) return;
   if (!confirm(`"${chat.title}" हटाएँ?`)) return;
   running.get(id)?.controller.abort();
+  deleteFiles(chatFileIds([chat])).catch(() => {});
   chats = chats.filter(c => c.id !== id);
   if (batch) batch.chatIds = batch.chatIds.filter(x => x !== id);
   if (currentId === id) currentId = chats[0]?.id || null;
@@ -913,11 +995,11 @@ function renderBatchProgress() {
 let pendingUpdate = null;
 
 function safeToReload() {
-  return running.size === 0 && !$('#input').value.trim() && !document.querySelector('dialog[open]');
+  return running.size === 0 && !pendingFiles.length && !$('#input').value.trim() && !document.querySelector('dialog[open]');
 }
 
 const APP_FILES = ['./', 'index.html', 'css/app.css', 'js/app.js', 'js/store.js', 'js/providers.js',
-  'js/markdown.js', 'js/queue.js', 'js/tools.js', 'js/run-worker.js', 'js/py-worker.js', 'manifest.webmanifest', 'sw.js'];
+  'js/markdown.js', 'js/queue.js', 'js/tools.js', 'js/files.js', 'js/run-worker.js', 'js/py-worker.js', 'manifest.webmanifest', 'sw.js'];
 
 let updating = false;
 async function applyUpdate(version) {
@@ -1067,6 +1149,7 @@ function onClick(e) {
         chats = [];
         currentId = null;
         batch = null;
+        clearFiles().catch(() => {});
         persistChats(true);
         renderChatList();
         toast('सारी चैट हटा दी गईं।');
@@ -1076,6 +1159,7 @@ function onClick(e) {
       if (confirm('सारी चैट और सारी API keys इस फ़ोन से हटाएँ?')) {
         abortAll();
         clearAll();
+        clearFiles().catch(() => {});
         settings = loadSettings();
         chats = [];
         currentId = null;
@@ -1099,6 +1183,13 @@ function onClick(e) {
       renderMulti();
       break;
     case 'mt-run': runBatch(); break;
+    case 'attach': $('#fileInput').click(); break;
+    case 'remove-file': {
+      const [a] = pendingFiles.splice(Number(b.dataset.i), 1);
+      if (a && !a.loading) deleteFiles([a.id]).catch(() => {});
+      renderAttachRow();
+      break;
+    }
     case 'mt-stop':
       if (batch) for (const cid of batch.chatIds) running.get(cid)?.controller.abort();
       break;
@@ -1131,6 +1222,11 @@ function init() {
     if (part) part.open = d.open;
   }, true);
   $('#composer').addEventListener('submit', onSubmit);
+  $('#fileInput').addEventListener('change', e => {
+    const list = [...e.target.files];
+    e.target.value = '';
+    onFilesPicked(list);
+  });
   const input = $('#input');
   input.addEventListener('input', autosize);
   input.addEventListener('keydown', e => {
