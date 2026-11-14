@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "test:browser": "node tests/team-browser.cjs"
+    "test:browser": "node tests/team-browser.cjs && node tests/official-browser.cjs && node tests/official-e2e.cjs",
+    "test:bridge": "npm --prefix browser-bridge test"
   },
   "devDependencies": { "playwright": "1.62.1" }
 }

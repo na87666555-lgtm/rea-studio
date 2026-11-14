@@ -6,9 +6,10 @@ import { renderMarkdown, escapeHtml } from './markdown.js';
 import { acquire, release } from './queue.js';
 import { TEAM_ROLES, suggestTeam, resolveTeam, runTeam } from './team.js';
 import { PROJECT_TOOLS, filesOf, writeProject, projectTool, projectContext, previewDocument } from './project.js';
+import { OfficialBridge, SITE_IDS, restoreOfficialBridge, parseWebsiteEdits, buildWebsitePrompt } from './official-bridge.js';
 
 // Bump together with version.json on every release.
-const APP_VERSION = '2026.11.14-7';
+const APP_VERSION = '2026.11.14-8';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const NEW_TITLE = 'नई चैट';
@@ -25,6 +26,10 @@ const multiDraft = { tasks: '', prefix: '', targets: [] };
 let editingConnId = null;
 let teamDraft = null;
 let editingTeamId = null;
+let officialBridge = restoreOfficialBridge();
+let officialSite = 'chatgpt';
+let officialActionBusy = false;
+let officialTeamBusy = false;
 let pendingFiles = []; // attachments picked for the next message
 let deferredInstall = null;
 let installed = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
@@ -129,8 +134,8 @@ function renderTopbar() {
   const chat = current();
   $('#topTitle').textContent = chat && chat.title !== NEW_TITLE ? chat.title : 'Rea Studio';
   if (chat?.team) {
-    chip.textContent = '✦ तीन AI · साथ';
-    chip.title = 'ChatGPT + Gemini + Claude · टीम सेटिंग्स';
+    chip.textContent = chat.team.mode === 'website' ? '🌐 वेबसाइट टीम' : '✦ तीन AI · साथ';
+    chip.title = chat.team.mode === 'website' ? 'असली वेबसाइटों के खाते · टीम सेटिंग्स' : 'ChatGPT + Gemini + Claude · टीम सेटिंग्स';
     return;
   }
   const c = chat ? conn(chat.connectionId) : defaultConn();
@@ -493,14 +498,17 @@ async function runTeamGeneration(chat) {
   const sharedSettings = structuredClone(settings);
   const sharedMessages = structuredClone(chat.messages.slice(0, -1));
   const sharedSystem = chat.system || sharedSettings.systemPrompt || '';
+  const websiteMode = chat.team.mode === 'website';
   try {
-    const members = resolveTeam(chat.team, sharedSettings.connections);
+    const members = websiteMode ? websiteTeamMembers() : resolveTeam(chat.team, sharedSettings.connections);
+    if (websiteMode) officialTeamBusy = true;
     msg.teamRuns = [];
     const result = await runTeam({ members, coordinator: chat.team.coordinator,
-      system: [sharedSystem, toolSystemPrompt(sharedSettings)].filter(Boolean).join('\n\n'),
-      getHistory: c => buildHistory(sharedMessages, c, sharedSettings),
-      tools: [...enabledTools(sharedSettings), ...PROJECT_TOOLS], signal: controller.signal,
+      system: [sharedSystem, websiteMode ? '' : toolSystemPrompt(sharedSettings)].filter(Boolean).join('\n\n'),
+      getHistory: c => websiteMode ? buildWebsiteHistory(sharedMessages) : buildHistory(sharedMessages, c, sharedSettings),
+      tools: websiteMode ? [] : [...enabledTools(sharedSettings), ...PROJECT_TOOLS], signal: controller.signal,
       getWorkspace: () => projectContext(chat),
+      ...(websiteMode ? { turn: officialWebsiteTurn, afterMember: (i, result) => saveWebsiteEdits(chat, i, result) } : {}),
       executeTool: async (name, args, signal) => {
         if (PROJECT_TOOLS.some(t => t.name === name)) {
           const previous = structuredClone(chat.workspace || { files: {} });
@@ -515,7 +523,11 @@ async function runTeamGeneration(chat) {
         }
         return runTool(name, args, sharedSettings, signal, { files: () => chatFiles({ messages: sharedMessages }) });
       },
-      onMember: (i, data) => { msg.teamRuns[i] = data; markDirty(chat.id); persistChats(); },
+      onMember: (i, data) => {
+        msg.teamRuns[i] = data;
+        if (websiteMode && data.status === 'working') { officialSite = SITE_IDS[i]; if ($('#officialDialog').open) refreshOfficialSiteLabel(); }
+        markDirty(chat.id); persistChats();
+      },
       onPhase: phase => { msg.teamPhase = phase; markDirty(chat.id); },
       onText: text => { msg.content += text; markDirty(chat.id); persistChats(); },
     });
@@ -526,6 +538,7 @@ async function runTeamGeneration(chat) {
     if (controller.signal.aborted) msg.stopped = true;
     else msg.error = friendlyError(error);
   } finally {
+    if (websiteMode) officialTeamBusy = false;
     delete msg.pending;
     running.delete(chat.id);
     touch(chat); persistChats(true); refreshStatus(chat);
@@ -551,15 +564,21 @@ function onSubmit(e) {
   const text = input.value.trim();
   if (pendingFiles.some(a => a.loading)) { toast('फ़ाइल तैयार हो रही है, एक पल रुकें।'); return; }
   if (!text && !pendingFiles.length) return;
-  if (!settings.connections.length) {
+  if (!settings.connections.length && chat?.team?.mode !== 'website') {
     toast('पहले एक API जोड़ें।');
     openConnDialog(null);
     return;
   }
   if (!chat) { chat = createChat(); currentId = chat.id; }
   if (chat.team) {
-    try { resolveTeam(chat.team, settings.connections); }
-    catch (error) { toast(error.message); openTeamDialog(chat); return; }
+    if (chat.team.mode === 'website') {
+      if (officialTeamBusy) { toast('वेबसाइट टीम पहले से काम कर रही है।'); return; }
+      if (!officialBridge?.session || !SITE_IDS.every(id => officialBridge.acknowledged[id])) { toast('पहले तीनों वेबसाइटों पर लॉगिन पूरा करें।'); openOfficialDialog(); return; }
+      if ([...pendingFiles, ...chat.messages.flatMap(m => m.attachments || [])].some(a => a.kind !== 'text')) { toast('वेबसाइट मोड अभी सिर्फ टेक्स्ट और कोड फ़ाइलें भेज सकता है।'); return; }
+    } else {
+      try { resolveTeam(chat.team, settings.connections); }
+      catch (error) { toast(error.message); openTeamDialog(chat); return; }
+    }
   } else if (!conn(chat.connectionId)) {
     const d = defaultConn();
     chat.connectionId = d.id;
@@ -584,6 +603,7 @@ function onSubmit(e) {
 function retry(i) {
   const chat = current();
   if (!chat || running.has(chat.id) || i !== chat.messages.length - 1) return;
+  if (chat.team?.mode === 'website' && officialTeamBusy) { toast('वेबसाइट टीम पहले से काम कर रही है।'); return; }
   chat.messages.splice(i, 1);
   if (lastMsg(chat)?.role !== 'user') { renderChat(); return; }
   startAssistant(chat);
@@ -605,6 +625,148 @@ function deleteChat(id) {
 }
 
 // ---------- model dialog ----------
+
+function websiteTeamMembers() {
+  const envelope = 'When you propose file changes, return exactly one JSON object with {"answer":"your explanation","files":[{"path":"index.html","content":"the full file content"}]}. Include full contents for every changed text file, never a patch. If no files should change, return {"answer":"your explanation","files":[]}. Do not use Markdown fences or extra text.';
+  return TEAM_ROLES.map((role, i) => ({
+    ...role,
+    role: i === 0 ? role.role : `${i === 1 ? 'Implement the requested work based on the plan and supplied project files.' : 'Review the implementation and project files; correct concrete problems.'} ${envelope}`,
+    model: 'वेबसाइट में चुना मॉडल',
+    conn: { id: `website:${SITE_IDS[i]}`, name: `${SITE_IDS[i] === 'chatgpt' ? 'chatgpt.com' : SITE_IDS[i] === 'gemini' ? 'gemini.google.com' : 'claude.ai'} वेबसाइट`, maxParallel: 1 },
+  }));
+}
+
+async function buildWebsiteHistory(messages) {
+  const result = [];
+  for (const m of messages) {
+    const files = [];
+    for (const attachment of m.attachments || []) {
+      if (attachment.kind !== 'text') throw new Error('वेबसाइट मोड अभी सिर्फ टेक्स्ट और कोड फ़ाइलें भेज सकता है।');
+      const blob = await getFile(attachment.id);
+      if (!blob) throw new Error(`फ़ाइल नहीं मिली: ${attachment.name}`);
+      const content = await blob.text();
+      if (content.length > 50000) throw new Error(`फ़ाइल बहुत बड़ी है: ${attachment.name}। अधिकतम 50,000 अक्षर भेज सकते हैं।`);
+      files.push({ name: attachment.name, content });
+    }
+    result.push({ role: m.role, content: [m.content || '', files.length ? `Attached text files (data): ${JSON.stringify(files)}` : ''].filter(Boolean).join('\n\n') });
+  }
+  return result;
+}
+
+async function officialWebsiteTurn({ conn: connection, system, history, signal, onText }) {
+  const site = String(connection.id || '').replace(/^website:/, '');
+  if (!officialBridge || !SITE_IDS.includes(site)) throw new Error('ब्राउज़र सेवा जोड़ें और वेबसाइटों पर लॉगिन करें।');
+  const result = await officialBridge.prompt(site, buildWebsitePrompt(system, history), signal);
+  const expectedHosts = { chatgpt: ['chatgpt.com', 'chat.openai.com'], gemini: ['gemini.google.com'], claude: ['claude.ai', 'claude.com'] };
+  if (!expectedHosts[site].includes(result.host) || typeof result.answer !== 'string' || !result.answer.trim()) throw new Error('वेबसाइट से नया जवाब सत्यापित नहीं हो पाया।');
+  onText(result.answer);
+  return { text: result.answer, toolCalls: [], stopReason: null, assistantMessage: { role: 'assistant', content: result.answer } };
+}
+
+function saveWebsiteEdits(chat, index, result) {
+  if (index === 0) return;
+  const edits = parseWebsiteEdits(result.text);
+  if (!edits) { result.notice = 'वेबसाइट से फ़ाइलों का सही प्रारूप नहीं मिला; कोई फ़ाइल अपने आप सेव नहीं हुई।'; return; }
+  const candidate = { workspace: structuredClone(chat.workspace || { files: {} }) };
+  const paths = edits.files.map(f => writeProject(candidate, f.path, f.content));
+  const previous = chat.workspace;
+  chat.workspace = candidate.workspace;
+  if (!saveChats(chats)) { chat.workspace = previous; throw new Error('फ़ोन की स्टोरेज में जगह नहीं है।'); }
+  result.text = edits.answer || (paths.length ? 'साझा प्रोजेक्ट में फ़ाइलें सेव की गईं।' : 'फ़ाइलों में बदलाव नहीं किया गया।');
+  if (paths.length) result.steps.push({ name: 'साझा प्रोजेक्ट फ़ाइलें', status: 'done', output: paths.join('\n') });
+}
+
+const SITE_NAMES = { chatgpt: 'ChatGPT', gemini: 'Gemini', claude: 'Claude' };
+function officialStatus(message) { $('#officialStatus').textContent = message; }
+function setOfficialBusy(busy) {
+  officialActionBusy = busy;
+  $('#officialDialog').querySelectorAll('button:not([data-action="close-dialog"])').forEach(button => { button.disabled = busy; });
+  $('#officialScreen').setAttribute('aria-busy', String(busy));
+}
+function refreshOfficialSiteLabel(host = '') {
+  const done = !!officialBridge?.acknowledged[officialSite];
+  $('#officialSite').textContent = `${SITE_NAMES[officialSite]}${host ? ` · ${host}` : ''} · ${done ? 'आपकी लॉगिन पुष्टि दर्ज है' : 'लॉगिन की पुष्टि बाकी है'}`;
+}
+function openOfficialDialog() {
+  closeDrawer();
+  $('#officialUrl').value = officialBridge?.base || '';
+  $('#officialToken').value = officialBridge?.token || '';
+  $('#officialText').value = '';
+  $('#officialControls').hidden = !officialBridge?.session;
+  officialStatus(officialBridge?.session ? 'अपनी वेबसाइट चुनें और उसकी स्क्रीन खोलें।' : 'अपनी भरोसेमंद ब्राउज़र सेवा जोड़ें।');
+  refreshOfficialSiteLabel();
+  $('#officialDialog').showModal();
+  if (officialBridge?.session) {
+    officialBridge.status(AbortSignal.timeout(15000)).then(() => refreshOfficialSiteLabel()).catch(() => officialStatus('सत्र समाप्त हो गया हो सकता है। सेवा फिर जोड़ें।'));
+  }
+}
+async function connectOfficial() {
+  if (officialActionBusy) return;
+  setOfficialBusy(true);
+  try {
+    const candidate = new OfficialBridge($('#officialUrl').value, $('#officialToken').value);
+    officialStatus('ब्राउज़र सेवा से जुड़ रहे हैं…');
+    await candidate.connect(AbortSignal.timeout(60000));
+    officialBridge = candidate;
+    $('#officialControls').hidden = false;
+    officialStatus('सेवा जुड़ गई। एक वेबसाइट चुनें और लॉगिन करें।');
+    refreshOfficialSiteLabel();
+  } catch (e) { officialStatus(e.message); }
+  finally { setOfficialBusy(false); }
+}
+async function viewOfficial() {
+  if (!officialBridge?.session || officialActionBusy) return;
+  setOfficialBusy(true);
+  try {
+    const site = officialSite;
+    officialStatus('वेबसाइट की स्क्रीन आ रही है…');
+    const data = await officialBridge.view(site, AbortSignal.timeout(60000));
+    if (site !== officialSite) return;
+    if (typeof data.image !== 'string' || !/^[A-Za-z0-9+/=]+$/.test(data.image) || data.image.length > 5000000) throw new Error('वेबसाइट की स्क्रीन नहीं मिली।');
+    $('#officialScreen').src = 'data:image/jpeg;base64,' + data.image;
+    refreshOfficialSiteLabel(data.host || '');
+    officialStatus(data.busy ? 'टीम काम कर रही है। स्क्रीन देखने के लिए ताज़ा करें।' : 'स्क्रीन पर टैप करके नियंत्रण करें।');
+  } catch (e) { officialStatus(e.message); }
+  finally { setOfficialBusy(false); }
+}
+async function officialAction(action, values = {}) {
+  if (officialTeamBusy) { officialStatus('टीम का काम पूरा होने दें या चैट से उसे रोकें।'); return false; }
+  if (!officialBridge?.session || officialActionBusy) return false;
+  setOfficialBusy(true);
+  try {
+    await officialBridge.action(officialSite, action, values, AbortSignal.timeout(30000));
+    if (action === 'reset') officialBridge.acknowledged[officialSite] = false;
+  } catch (e) { officialStatus(e.message); return false; }
+  finally { setOfficialBusy(false); }
+  await viewOfficial();
+  return true;
+}
+async function confirmOfficialLogin() {
+  if (officialTeamBusy) { officialStatus('टीम का काम पूरा होने दें या चैट से उसे रोकें।'); return; }
+  if (!officialBridge?.session || officialActionBusy) return;
+  setOfficialBusy(true);
+  try {
+    const r = await officialBridge.acknowledge(officialSite, AbortSignal.timeout(30000));
+    refreshOfficialSiteLabel(); officialStatus(r.notice || 'आपकी पुष्टि दर्ज हुई।');
+  } catch (e) { officialStatus(e.message); }
+  finally { setOfficialBusy(false); }
+}
+async function closeOfficialSession() {
+  if (!officialBridge || officialActionBusy) return;
+  if (officialTeamBusy) { officialStatus('पहले टीम का काम रोकें।'); return; }
+  setOfficialBusy(true);
+  try { await officialBridge.close(); officialStatus('ब्राउज़र सत्र बंद कर दिया गया।'); }
+  catch { officialStatus('सर्वर से संपर्क नहीं हुआ; सत्र निष्क्रिय होने पर बंद होगा।'); }
+  finally { officialBridge = null; setOfficialBusy(false); $('#officialControls').hidden = true; $('#officialScreen').removeAttribute('src'); $('#officialToken').value = ''; }
+}
+
+function syncTeamMode() {
+  const website = $('#tdMode').value === 'website';
+  $('#teamApiFields').hidden = website;
+  $('#teamApiHint').hidden = website;
+  $('#teamWebsiteHint').hidden = !website;
+  $('#teamApiFields').querySelectorAll('input, select').forEach(el => { el.required = !website; });
+}
 
 let projectDialogChat = null;
 function refreshProjectFiles(select = '') {
@@ -690,12 +852,15 @@ function renderTeamMembers() {
 function openTeamDialog(chat = null) {
   if (chat && running.has(chat.id)) { toast('टीम बदलने से पहले चल रहा जवाब रोकें।'); return; }
   editingTeamId = chat?.id || null;
-  teamDraft = structuredClone(chat?.team || { members: suggestTeam(settings.connections), coordinator: 2 });
+  teamDraft = structuredClone(chat?.team || { mode: 'api', members: suggestTeam(settings.connections), coordinator: 2 });
+  if (!Array.isArray(teamDraft.members) || teamDraft.members.length !== 3) teamDraft.members = suggestTeam(settings.connections);
+  $('#tdMode').value = teamDraft.mode === 'website' ? 'website' : 'api';
   $('#tdTitle').value = chat?.title || '';
   $('#tdSystem').value = chat?.system || '';
   $('#tdCoordinator').value = String(teamDraft.coordinator ?? 2);
   $('#tdStatus').textContent = settings.connections.length ? '' : 'शुरू करने के लिए नीचे API कनेक्शन जोड़ें।';
   renderTeamMembers();
+  syncTeamMode();
   $('#teamDialog').showModal();
 }
 
@@ -739,12 +904,15 @@ async function testTeamModel(i, button) {
 
 function saveTeamDialog(e) {
   e.preventDefault(); readTeamDraft();
-  try { resolveTeam(teamDraft, settings.connections); }
-  catch (error) { $('#tdStatus').textContent = error.message; return; }
+  const mode = $('#tdMode').value;
+  if (mode !== 'website') {
+    try { resolveTeam(teamDraft, settings.connections); }
+    catch (error) { $('#tdStatus').textContent = error.message; return; }
+  }
   let chat = editingTeamId ? chatById(editingTeamId) : null;
   if (editingTeamId && !chat) { $('#tdStatus').textContent = 'यह चैट हट चुकी है। नई टीम बनाएँ।'; return; }
   if (!chat) chat = createChat();
-  chat.team = { members: structuredClone(teamDraft.members), coordinator: Number($('#tdCoordinator').value) };
+  chat.team = { mode, members: structuredClone(teamDraft.members), coordinator: Number($('#tdCoordinator').value) };
   chat.title = $('#tdTitle').value.trim() || 'साझा प्रोजेक्ट';
   chat.system = $('#tdSystem').value.trim();
   currentId = chat.id; touch(chat); persistChats(true);
@@ -1004,6 +1172,7 @@ function saveConnDialog(e) {
     const suggestions = suggestTeam(settings.connections);
     teamDraft.members = teamDraft.members.map((m, i) => m.connectionId ? m : suggestions[i]);
     renderTeamMembers();
+    syncTeamMode();
   }
   renderTopbar();
 }
@@ -1232,7 +1401,7 @@ function safeToReload() {
 }
 
 const APP_FILES = ['./', 'index.html', 'css/app.css', 'js/app.js', 'js/store.js', 'js/providers.js',
-  'js/markdown.js', 'js/queue.js', 'js/team.js', 'js/project.js', 'project-preview.html', 'js/project-preview.js', 'js/tools.js', 'js/files.js', 'js/run-worker.js', 'js/py-worker.js', 'manifest.webmanifest', 'sw.js'];
+  'js/markdown.js', 'js/queue.js', 'js/team.js', 'js/project.js', 'js/official-bridge.js', 'project-preview.html', 'js/project-preview.js', 'js/tools.js', 'js/files.js', 'js/run-worker.js', 'js/py-worker.js', 'manifest.webmanifest', 'sw.js'];
 
 let updating = false;
 async function applyUpdate(version) {
@@ -1329,6 +1498,31 @@ function onClick(e) {
   if (!b) return;
   const id = b.dataset.id;
   switch (b.dataset.action) {
+    case 'official-browser': openOfficialDialog(); break;
+    case 'official-connect': connectOfficial(); break;
+    case 'official-close-session': closeOfficialSession(); break;
+    case 'official-site':
+      if (officialTeamBusy) { officialStatus('टीम का काम पूरा होने दें या चैट से उसे रोकें।'); break; }
+      if (!officialActionBusy && SITE_IDS.includes(b.dataset.site)) { officialSite = b.dataset.site; $('#officialScreen').removeAttribute('src'); refreshOfficialSiteLabel(); viewOfficial(); }
+      break;
+    case 'official-refresh': viewOfficial(); break;
+    case 'official-up': officialAction('scroll', { delta: -550 }); break;
+    case 'official-down': officialAction('scroll', { delta: 550 }); break;
+    case 'official-enter': officialAction('key', { key: 'Enter' }); break;
+    case 'official-backspace': officialAction('key', { key: 'Backspace' }); break;
+    case 'official-select-all': officialAction('key', { key: 'Control+A' }); break;
+    case 'official-tab': officialAction('key', { key: 'Tab' }); break;
+    case 'official-type': {
+      const field = $('#officialText'); const value = field.value;
+      if (value) officialAction('text', { text: value }).then(ok => { if (ok && field.value === value) field.value = ''; });
+      break;
+    }
+    case 'official-toggle': {
+      const field = $('#officialText'); field.type = field.type === 'password' ? 'text' : 'password';
+      b.textContent = field.type === 'password' ? 'टेक्स्ट दिखाएँ' : 'टек्स्ट छिपाएँ'; break;
+    }
+    case 'official-reset': officialAction('reset'); break;
+    case 'official-ack': confirmOfficialLogin(); break;
     case 'open-project': openProjectDialog(); break;
     case 'project-save': saveProjectFile(); break;
     case 'project-refresh': refreshProjectFiles(); break;
@@ -1485,6 +1679,25 @@ function init() {
   });
   $('#modelForm').addEventListener('submit', saveModelDialog);
   $('#teamForm').addEventListener('submit', saveTeamDialog);
+  $('#tdMode').addEventListener('change', syncTeamMode);
+  let officialPointer = null;
+  const screenCoordinates = e => {
+    const bounds = e.currentTarget.getBoundingClientRect();
+    if (!bounds.width || !bounds.height || !e.currentTarget.naturalWidth) return null;
+    return { x: Math.max(0, Math.min(412, (e.clientX - bounds.left) * 412 / bounds.width)), y: Math.max(0, Math.min(780, (e.clientY - bounds.top) * 780 / bounds.height)) };
+  };
+  $('#officialScreen').addEventListener('pointerdown', e => {
+    officialPointer = screenCoordinates(e);
+    if (officialPointer) { e.currentTarget.setPointerCapture(e.pointerId); e.preventDefault(); }
+  });
+  $('#officialScreen').addEventListener('pointerup', e => {
+    const end = screenCoordinates(e), start = officialPointer; officialPointer = null;
+    if (!start || !end) return;
+    if (Math.hypot(end.x - start.x, end.y - start.y) > 8) officialAction('drag', { x1: start.x, y1: start.y, x2: end.x, y2: end.y });
+    else officialAction('click', start);
+    e.preventDefault();
+  });
+  $('#officialScreen').addEventListener('pointercancel', () => { officialPointer = null; });
   $('#projectSelect').addEventListener('change', e => {
     const path = e.target.value; const chat = chatById(projectDialogChat);
     $('#projectPath').value = path;
@@ -1497,6 +1710,7 @@ function init() {
     const c = conn(teamDraft.members[i].connectionId);
     teamDraft.members[i].model = [c?.defaultModel, ...(c?.models || [])].find(m => m && TEAM_ROLES[i].match.test(m)) || '';
     renderTeamMembers();
+    syncTeamMode();
   });
   $('#mdConn').addEventListener('change', () => {
     const c = conn($('#mdConn').value);
@@ -1536,6 +1750,7 @@ function init() {
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {});
   }
   startAutoUpdate();
+  if (officialBridge?.session) officialBridge.status(AbortSignal.timeout(15000)).catch(() => {});
 }
 
 init();
