@@ -38,6 +38,7 @@
         <button type="button" class="icon-btn only-mobile" data-action="open-drawer" aria-label="मेनू">☰</button>
         <button type="button" id="backBtn" class="icon-btn" data-action="show-chat" aria-label="वापस" hidden>←</button>
         <div class="topbar-title" id="topTitle">Rea Studio</div>
+        <button type="button" id="projectBtn" class="chip" data-action="open-project" hidden>⌘ कोड</button>
         <button type="button" id="modelChip" class="chip" data-action="open-model">मॉडल चुनें</button>
       </header>
 
@@ -62,7 +63,7 @@
   <dialog id="teamDialog" class="dlg team-dialog">
     <form id="teamForm">
       <h2>✦ तीन AI · एक प्रोजेक्ट</h2>
-      <p class="hint">ChatGPT, Gemini और Claude एक ही बातचीत और फ़ाइलों पर काम करेंगे। उनके सुझाव मिलाकर एक साझा जवाब मिलेगा।</p>
+      <p class="hint">ChatGPT योजना बनाएगा, Gemini साझा प्रोजेक्ट में काम करेगा और Claude उसकी जाँच करेगा। फिर एक साझा जवाब मिलेगा।</p>
       <label>प्रोजेक्ट का नाम<input id="tdTitle" maxlength="100" placeholder="मेरा साझा प्रोजेक्ट"></label>
       <div id="teamMembers"></div>
       <button type="button" class="btn small" data-action="team-add-api">+ API कनेक्शन जोड़ें</button>
@@ -75,6 +76,17 @@
         <button type="submit" class="btn primary">टीम सेव करें</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="projectDialog" class="dlg project-dialog">
+    <div class="project-header"><h2>⌘ प्रोजेक्ट कोड</h2><button type="button" class="btn small" data-action="close-dialog">बंद करें</button></div>
+    <p class="hint">यह प्रोजेक्ट इसी चैट में सेव होता है। index.html, style.css और script.js का प्रीव्यू नीचे देख सकते हैं।</p>
+    <label>मौजूदा फ़ाइल<select id="projectSelect"><option value="">नई फ़ाइल</option></select></label>
+    <label>फ़ाइल का नाम<input id="projectPath" placeholder="index.html" autocomplete="off" spellcheck="false"></label>
+    <label>कोड<textarea id="projectContent" class="project-editor" rows="12" spellcheck="false" placeholder="फ़ाइल का कोड यहाँ लिखें…"></textarea></label>
+    <div class="row wrap"><button type="button" class="btn primary" data-action="project-save">फ़ाइल सेव करें</button><button type="button" class="btn" data-action="project-refresh">फ़ाइल लिस्ट ताज़ा करें</button><button type="button" class="btn" data-action="project-preview">▶ प्रीव्यू चलाएँ</button><button type="button" class="btn" data-action="project-download">⬇ फ़ाइल डाउनलोड</button><button type="button" class="btn danger" data-action="project-delete">फ़ाइल हटाएँ</button></div>
+    <p id="projectStatus" class="hint" role="status"></p>
+    <iframe id="projectPreview" title="प्रोजेक्ट प्रीव्यू" class="project-preview" sandbox="allow-scripts" hidden></iframe>
   </dialog>
 
   <dialog id="modelDialog" class="dlg">

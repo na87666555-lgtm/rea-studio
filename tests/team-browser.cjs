@@ -26,7 +26,7 @@ async function main() {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const page = await context.newPage();
     const errors = []; page.on('pageerror', e => errors.push(e.message));
-    const calls = []; let failGemini = false; let hold = false;
+    const calls = []; let failGemini = false; let hold = false; let claudeSawFile = false; let synthesisSawFile = false;
     await page.route('https://*.test/**', async route => {
       if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' } });
       const body = route.request().postDataJSON(); calls.push(body);
@@ -35,6 +35,12 @@ async function main() {
       if (failGemini && body.model === 'gemini-test') return route.fulfill({ status: 429, json: { error: { message: 'Test limit' } } });
       const system = anth ? body.system : body.messages[0]?.content;
       const synth = system?.includes('ONE useful final answer');
+      const coding = JSON.stringify(body.messages).includes('वेब कोड बनाओ');
+      if (coding && body.model === 'gemini-test' && !body.messages.some(m => m.role === 'tool')) {
+        return route.fulfill({ json: { choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'write1', type: 'function', function: { name: 'project_write', arguments: JSON.stringify({ path: 'index.html', content: '<h1>तैयार</h1><script>document.querySelector("h1").textContent="कोड चला"; try { parent.document.body.dataset.intruded="yes" } catch(e) { document.body.dataset.isolated="yes" }</script>' }) } }] }, finish_reason: 'tool_calls' }] } });
+      }
+      if (coding && anth && !synth) claudeSawFile = JSON.stringify(body.messages).includes('index.html');
+      if (coding && synth) synthesisSawFile = JSON.stringify(body.messages).includes('index.html');
       const reply = synth ? 'यह तीनों का साझा जवाब है: प्रोजेक्ट में सोलर ऊर्जा लगाएँ।' : `${body.model} का योगदान: सोलर ऊर्जा और लागत देखें।`;
       if (synth) return route.fulfill({ contentType: 'text/event-stream', body: anth
         ? `event: content_block_start\ndata: ${JSON.stringify({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })}\n\nevent: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: reply } })}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n`
@@ -92,6 +98,24 @@ async function main() {
     assert.ok((await page.locator('.team-status').last().innerText()).includes('2/3'));
     assert.ok(calls.every(c => JSON.stringify(c).includes('मेरे घर के लिए सोलर')));
     assert.ok(calls.every(c => JSON.stringify(c).includes('यह तीनों का साझा जवाब')));
+    await page.waitForFunction(() => !document.querySelector('#sendBtn').classList.contains('stop'));
+    failGemini = false;
+    await page.locator('#input').fill('वेब कोड बनाओ'); await page.locator('#sendBtn').click();
+    await page.waitForFunction(() => document.querySelectorAll('.team-status').length === 3 && [...document.querySelectorAll('.team-status')].at(-1)?.textContent.includes('साझा जवाब तैयार'));
+    assert.equal(claudeSawFile, true); assert.equal(synthesisSawFile, true);
+    await page.locator('#projectBtn').click();
+    assert.equal(await page.locator('#projectPath').inputValue(), 'index.html');
+    assert.ok((await page.locator('#projectContent').inputValue()).includes('कोड चला'));
+    await page.locator('[data-action="project-preview"]').click();
+    await page.frameLocator('#projectPreview').locator('h1').waitFor();
+    assert.equal(await page.frameLocator('#projectPreview').locator('h1').innerText(), 'कोड चला');
+    assert.equal(await page.frameLocator('#projectPreview').locator('body').getAttribute('data-isolated'), 'yes');
+    assert.equal(await page.locator('body').getAttribute('data-intruded'), null);
+    await page.locator('#projectDialog [data-action="close-dialog"]').click();
+    await page.reload();
+    await page.locator('#projectBtn').click();
+    assert.ok((await page.locator('#projectContent').inputValue()).includes('कोड चला'));
+    await page.locator('#projectDialog [data-action="close-dialog"]').click();
     failGemini = false; hold = true;
     await page.locator('#input').fill('अगला काम'); await page.locator('#sendBtn').click();
     await page.waitForFunction(() => document.querySelector('#sendBtn').classList.contains('stop'));

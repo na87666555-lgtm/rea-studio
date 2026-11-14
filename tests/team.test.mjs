@@ -17,11 +17,14 @@ function setup(extra = {}) {
     onText: t => { events.output += t; }, ...extra } };
 }
 
-test('all three draft concurrently; synthesis sees all contributions and the shared history, without keys', async () => {
+test('each role sees earlier handoffs and synthesis sees all contributions without keys', async () => {
   let active = 0; let peak = 0; const calls = [];
   const s = setup({ turn: async args => {
     calls.push(args);
     if (!args.system.includes('ONE useful final answer')) {
+      const history = JSON.stringify(args.history);
+      if (args.model === 'gemini-test') assert.ok(history.includes('gpt-test: useful evidence'));
+      if (args.model === 'claude-test') { assert.ok(history.includes('gpt-test: useful evidence')); assert.ok(history.includes('gemini-test: useful evidence')); }
       active++; peak = Math.max(peak, active);
       await new Promise(r => setTimeout(r, 15)); active--;
       args.onText(`${args.model}: useful evidence`); return response();
@@ -32,7 +35,7 @@ test('all three draft concurrently; synthesis sees all contributions and the sha
     args.onText('One combined answer'); return response();
   } });
   const result = await runTeam(s.opts);
-  assert.equal(peak, 3); assert.equal(calls.length, 4);
+  assert.equal(peak, 1); assert.equal(calls.length, 4);
   assert.equal(s.events.output, 'One combined answer');
   assert.equal(result.completed, 3); assert.equal(result.coordinator, 'Claude');
   assert.deepEqual(s.events.phases, ['drafts', 'synthesis', 'done']);
@@ -111,4 +114,18 @@ test('shared attachments reach each member and incomplete team configuration fai
     turn: async args => { assert.deepEqual(args.history[0].images, [image]); args.onText('image checked'); return response(); } });
   await runTeam(s.opts);
   assert.throws(() => resolveTeam({ members: suggestTeam([]) }, connections), /API कनेक्शन/);
+});
+
+test('planner cannot write project files; implementer and reviewer can', async () => {
+  const writes = [];
+  const s = setup({ tools: [{ name: 'project_write' }],
+    executeTool: async (_, args) => { writes.push(args.model); return { ok: true, text: 'saved' }; },
+    turn: async args => {
+      if (args.system.includes('ONE useful final answer')) { args.onText('done'); return response(); }
+      if (!args.trail.length) return { toolCalls: [{ id: 'call', name: 'project_write', args: { model: args.model } }], assistantMessage: { role: 'assistant', content: 'write' } };
+      if (args.model === 'gpt-test') assert.ok(JSON.stringify(args.trail).includes('not available'));
+      args.onText('done'); return response();
+    } });
+  await runTeam(s.opts);
+  assert.deepEqual(writes, ['gemini-test', 'claude-test']);
 });

@@ -5,9 +5,10 @@ import { addAttachment, getFile, deleteFiles, clearFiles, blobToBase64, formatSi
 import { renderMarkdown, escapeHtml } from './markdown.js';
 import { acquire, release } from './queue.js';
 import { TEAM_ROLES, suggestTeam, resolveTeam, runTeam } from './team.js';
+import { PROJECT_TOOLS, filesOf, writeProject, projectTool, projectContext, previewDocument } from './project.js';
 
 // Bump together with version.json on every release.
-const APP_VERSION = '2026.11.14-5';
+const APP_VERSION = '2026.11.14-6';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const NEW_TITLE = 'नई चैट';
@@ -115,6 +116,7 @@ function show(v) {
 
 function renderTopbar() {
   const chip = $('#modelChip');
+  $('#projectBtn').hidden = view !== 'chat' || !current()?.team;
   const back = $('#backBtn');
   if (view !== 'chat') {
     $('#topTitle').textContent = view === 'settings' ? 'API और सेटिंग्स' : 'एक साथ कई काम';
@@ -164,7 +166,7 @@ function welcomeHtml() {
   const has = settings.connections.length > 0;
   if (current()?.team) return `<div class="welcome team-welcome">
     <div class="team-orbit" aria-hidden="true">✦</div><h1>तीन ताकतें। एक साझा जवाब।</h1>
-    <p>ChatGPT · Gemini · Claude</p><p class="hint">अपना विषय लिखें या फ़ाइल जोड़ें। तीनों इसी प्रोजेक्ट की बातचीत देखकर साथ काम करेंगे।</p>
+    <p>ChatGPT · Gemini · Claude</p><p class="hint">तीनों योजना, निर्माण और जाँच की अलग भूमिकाओं में काम करेंगे। ऊपर ⌘ कोड से साझा प्रोजेक्ट देखें।</p>
     <button type="button" class="btn" data-action="open-model">टीम और प्रोजेक्ट के निर्देश</button></div>`;
   return `<div class="welcome">
     <img src="icons/icon.svg" alt="" width="64" height="64">
@@ -217,12 +219,12 @@ function messageHtml(chat, m, i) {
 
 function teamProgressHtml(m, i) {
   const labels = { queued: 'कतार में', working: 'काम कर रहा है', done: 'योगदान तैयार', error: 'त्रुटि', stopped: 'रुका' };
-  const phase = { drafts: 'तीनों आपके विषय पर काम कर रहे हैं', synthesis: 'योगदान मिलाकर साझा जवाब बन रहा है', done: 'साझा जवाब तैयार', stopped: 'काम रुक गया', error: 'साझा जवाब पूरा नहीं हुआ' };
+  const phase = { drafts: 'योजना → निर्माण → जाँच', synthesis: 'साझा परिणाम तैयार हो रहा है', done: 'साझा जवाब तैयार', stopped: 'काम रुक गया', error: 'साझा जवाब पूरा नहीं हुआ' };
   const completed = m.teamRuns.filter(r => r?.status === 'done').length;
   return `<div class="team-progress"><div class="team-status">${phase[m.teamPhase] || 'टीम तैयारी कर रही है'} · ${completed}/3 योगदान</div>
     <div class="team-badges">${m.teamRuns.map(r => `<span class="team-badge ${escapeHtml(r.status)}"><strong>${escapeHtml(r.label)}</strong><span>${labels[r.status] || 'तैयारी'}</span></span>`).join('')}</div>
     <details class="team-contributions" data-mi="${i}"${m.teamOpen ? ' open' : ''}><summary>तीनों का योगदान देखें</summary>
-    ${m.teamRuns.map(r => `<article class="team-contribution"><h3>${escapeHtml(r.label)} <small>${escapeHtml(r.model)}</small></h3>
+    ${m.teamRuns.map((r,i) => `<article class="team-contribution"><h3>${escapeHtml(r.label)} · ${['योजना','निर्माण','जाँच'][i]} <small>${escapeHtml(r.model)}</small></h3>
       ${r.error ? `<p class="err-box">${escapeHtml(r.error)}</p>` : ''}${r.notice ? `<p class="hint">${escapeHtml(r.notice)}</p>` : ''}
       <div class="md">${renderMarkdown(r.text || 'अभी योगदान नहीं आया।')}</div>
       ${(r.steps || []).map(s => `<details><summary>🛠 ${escapeHtml(s.name)} · ${escapeHtml(s.status)}</summary><pre class="team-tool-output">${escapeHtml(s.output)}</pre></details>`).join('')}</article>`).join('')}</details></div>`;
@@ -497,8 +499,22 @@ async function runTeamGeneration(chat) {
     const result = await runTeam({ members, coordinator: chat.team.coordinator,
       system: [sharedSystem, toolSystemPrompt(sharedSettings)].filter(Boolean).join('\n\n'),
       getHistory: c => buildHistory(sharedMessages, c, sharedSettings),
-      tools: enabledTools(sharedSettings), signal: controller.signal,
-      executeTool: (name, args, signal) => runTool(name, args, sharedSettings, signal, { files: () => chatFiles({ messages: sharedMessages }) }),
+      tools: [...enabledTools(sharedSettings), ...PROJECT_TOOLS], signal: controller.signal,
+      getWorkspace: () => projectContext(chat),
+      executeTool: async (name, args, signal) => {
+        if (PROJECT_TOOLS.some(t => t.name === name)) {
+          const previous = structuredClone(chat.workspace || { files: {} });
+          try {
+            const out = projectTool(chat, name, args || {});
+            if (name === 'project_write' && out.ok && !saveChats(chats)) {
+              chat.workspace = previous;
+              return { ok: false, text: 'फ़ोन की स्टोरेज में फ़ाइल सेव नहीं हो पाई।' };
+            }
+            return out;
+          } catch (e) { return { ok: false, text: e.message }; }
+        }
+        return runTool(name, args, sharedSettings, signal, { files: () => chatFiles({ messages: sharedMessages }) });
+      },
       onMember: (i, data) => { msg.teamRuns[i] = data; markDirty(chat.id); persistChats(); },
       onPhase: phase => { msg.teamPhase = phase; markDirty(chat.id); },
       onText: text => { msg.content += text; markDirty(chat.id); persistChats(); },
@@ -589,6 +605,68 @@ function deleteChat(id) {
 }
 
 // ---------- model dialog ----------
+
+let projectDialogChat = null;
+function refreshProjectFiles(select = '') {
+  const chat = chatById(projectDialogChat);
+  if (!chat) return;
+  const files = filesOf(chat);
+  $('#projectSelect').innerHTML = '<option value="">नई फ़ाइल</option>' + Object.keys(files).sort().map(path => `<option value="${escapeHtml(path)}">${escapeHtml(path)}</option>`).join('');
+  if (select && Object.hasOwn(files, select)) $('#projectSelect').value = select;
+}
+function openProjectDialog() {
+  const chat = current();
+  if (!chat?.team) return;
+  projectDialogChat = chat.id;
+  refreshProjectFiles();
+  const first = Object.keys(filesOf(chat)).sort()[0] || '';
+  $('#projectSelect').value = first;
+  $('#projectPath').value = first;
+  $('#projectContent').value = first ? filesOf(chat)[first] : '';
+  $('#projectStatus').textContent = running.has(chat.id) ? 'टीम अभी काम कर रही है; फ़ाइल सेव करने से पहले उसके पूरा होने का इंतज़ार करें।' : '';
+  $('#projectPreview').hidden = true;
+  $('#projectDialog').showModal();
+}
+function saveProjectFile() {
+  const chat = chatById(projectDialogChat);
+  if (!chat) return;
+  if (running.has(chat.id)) { $('#projectStatus').textContent = 'टीम का मौजूदा काम पूरा होने पर फ़ाइल सेव करें।'; return; }
+  const previous = structuredClone(chat.workspace || { files: {} });
+  try {
+    const path = writeProject(chat, $('#projectPath').value, $('#projectContent').value);
+    if (!saveChats(chats)) { chat.workspace = previous; throw new Error('फ़ोन की स्टोरेज में सेव नहीं हुआ।'); }
+    refreshProjectFiles(path); $('#projectStatus').textContent = `${path} सेव हो गई।`;
+  } catch (e) { $('#projectStatus').textContent = e.message; }
+}
+function showProjectPreview() {
+  const chat = chatById(projectDialogChat);
+  if (!chat) return;
+  const frame = $('#projectPreview');
+  frame.hidden = false;
+  const html = previewDocument(chat);
+  frame.onload = () => frame.contentWindow.postMessage({ type: 'rea-preview', html }, '*');
+  frame.src = 'project-preview.html';
+  $('#projectStatus').textContent = 'प्रीव्यू सेव की गई फ़ाइलों से चलता है। नेटवर्क और बाहरी स्क्रिप्ट बंद हैं।';
+}
+function downloadProjectFile() {
+  const chat = chatById(projectDialogChat);
+  const path = $('#projectSelect').value;
+  if (!chat || !path || !Object.hasOwn(filesOf(chat), path)) { $('#projectStatus').textContent = 'पहले सेव की हुई फ़ाइल चुनें।'; return; }
+  const url = URL.createObjectURL(new Blob([filesOf(chat)[path]], { type: 'text/plain;charset=utf-8' }));
+  const a = document.createElement('a'); a.href = url; a.download = path.split('/').pop(); a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+function deleteProjectFile() {
+  const chat = chatById(projectDialogChat);
+  const path = $('#projectSelect').value;
+  if (!chat || !path || running.has(chat.id)) { $('#projectStatus').textContent = 'फ़ाइल चुनें और टीम का काम पूरा होने दें।'; return; }
+  if (!confirm(`प्रोजेक्ट से "${path}" हटाएँ?`)) return;
+  const previous = structuredClone(chat.workspace);
+  delete filesOf(chat)[path];
+  if (!saveChats(chats)) { chat.workspace = previous; $('#projectStatus').textContent = 'बदलाव सेव नहीं हो पाया।'; return; }
+  refreshProjectFiles(); $('#projectPath').value = ''; $('#projectContent').value = '';
+  $('#projectStatus').textContent = 'फ़ाइल हट गई।';
+}
 
 function readTeamDraft() {
   if (!teamDraft) return;
@@ -1132,7 +1210,7 @@ function safeToReload() {
 }
 
 const APP_FILES = ['./', 'index.html', 'css/app.css', 'js/app.js', 'js/store.js', 'js/providers.js',
-  'js/markdown.js', 'js/queue.js', 'js/team.js', 'js/tools.js', 'js/files.js', 'js/run-worker.js', 'js/py-worker.js', 'manifest.webmanifest', 'sw.js'];
+  'js/markdown.js', 'js/queue.js', 'js/team.js', 'js/project.js', 'project-preview.html', 'js/project-preview.js', 'js/tools.js', 'js/files.js', 'js/run-worker.js', 'js/py-worker.js', 'manifest.webmanifest', 'sw.js'];
 
 let updating = false;
 async function applyUpdate(version) {
@@ -1229,6 +1307,12 @@ function onClick(e) {
   if (!b) return;
   const id = b.dataset.id;
   switch (b.dataset.action) {
+    case 'open-project': openProjectDialog(); break;
+    case 'project-save': saveProjectFile(); break;
+    case 'project-refresh': refreshProjectFiles(); break;
+    case 'project-preview': showProjectPreview(); break;
+    case 'project-download': downloadProjectFile(); break;
+    case 'project-delete': deleteProjectFile(); break;
     case 'new-team': closeDrawer(); openTeamDialog(); break;
     case 'team-add-api': readTeamDraft(); openConnDialog(null); break;
     case 'team-fetch': fetchTeamModels(Number(b.dataset.i), b); break;
@@ -1378,6 +1462,11 @@ function init() {
   });
   $('#modelForm').addEventListener('submit', saveModelDialog);
   $('#teamForm').addEventListener('submit', saveTeamDialog);
+  $('#projectSelect').addEventListener('change', e => {
+    const path = e.target.value; const chat = chatById(projectDialogChat);
+    $('#projectPath').value = path;
+    $('#projectContent').value = chat && path ? filesOf(chat)[path] || '' : '';
+  });
   $('#teamMembers').addEventListener('change', e => {
     if (!e.target.matches('[data-team-conn]')) return;
     readTeamDraft();
