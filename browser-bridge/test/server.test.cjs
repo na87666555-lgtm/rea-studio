@@ -1,6 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createBridge, configuration, allowedDestination, tokenMatches } = require('../server.cjs');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
 const token = 'this-is-a-test-token-with-40-characters-long';
 const origin = 'https://na87666555-lgtm.github.io';
@@ -10,6 +13,12 @@ test('configuration rejects weak secrets and nonlocal cleartext origins', () => 
   assert.throws(() => configuration({ REA_BRIDGE_TOKEN: token, REA_APP_ORIGIN: 'http://example.com' }), /HTTPS/);
   assert.equal(configuration({ REA_BRIDGE_TOKEN: token, REA_APP_ORIGIN: origin }).origin, origin);
   assert.equal(tokenMatches(token, token), true); assert.equal(tokenMatches('wrong', token), false);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rea-secret-test-'));
+  try {
+    const file = path.join(dir, 'token'); fs.writeFileSync(file, token + '\n', { mode: 0o600 });
+    assert.equal(configuration({ REA_BRIDGE_TOKEN_FILE: file }).token, token);
+    assert.throws(() => configuration({ REA_BRIDGE_TOKEN: token, REA_BRIDGE_TOKEN_FILE: file }), /either/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('browser network is restricted to public provider and login hostnames', () => {

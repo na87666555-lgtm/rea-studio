@@ -4,6 +4,7 @@
 // The user operates the visible browser remotely. No model API substitution.
 const http = require('node:http');
 const crypto = require('node:crypto');
+const fs = require('node:fs');
 const { chromium } = require('playwright');
 const { SERVICES, assertOfficialHost, submitPrompt } = require('./providers.cjs');
 
@@ -27,7 +28,12 @@ function allowedDestination(raw) {
 }
 
 function configuration(env = process.env) {
-  const token = env.REA_BRIDGE_TOKEN || '';
+  if (env.REA_BRIDGE_TOKEN && env.REA_BRIDGE_TOKEN_FILE) throw new Error('Set either REA_BRIDGE_TOKEN or REA_BRIDGE_TOKEN_FILE, not both.');
+  let token = env.REA_BRIDGE_TOKEN || '';
+  if (env.REA_BRIDGE_TOKEN_FILE) {
+    try { token = fs.readFileSync(env.REA_BRIDGE_TOKEN_FILE, 'utf8').trim(); }
+    catch { throw new Error('Could not read the bridge token file.'); }
+  }
   const origin = env.REA_APP_ORIGIN || 'https://na87666555-lgtm.github.io';
   if (token.length < 32) throw new Error('Set REA_BRIDGE_TOKEN to a unique random value of at least 32 characters.');
   let parsed;

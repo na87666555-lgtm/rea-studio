@@ -15,7 +15,7 @@ This optional, single-user service runs an isolated Chromium session for the Rea
 
 ## Running locally
 
-Node.js 20+ and a Playwright Chromium installation are required. Set `REA_BRIDGE_TOKEN` to a unique, random secret at least 32 characters long. Set `REA_APP_ORIGIN` to the **exact** origin of the frontend (for the published app, `https://na87666555-lgtm.github.io`); HTTPS is mandatory except for `http://localhost` or `http://127.0.0.1` development origins. `PORT` defaults to 3000. Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` only when using a system Chromium.
+Node.js 20+ and a Playwright Chromium installation are required. Set `REA_BRIDGE_TOKEN` to a unique, random secret at least 32 characters long, or set `REA_BRIDGE_TOKEN_FILE` to a protected file containing it; do not set both. On Render, a secret file is available under `/etc/secrets/` and the Docker image's `node` user belongs to group 1000. Set `REA_APP_ORIGIN` to the **exact** origin of the frontend (for the published app, `https://na87666555-lgtm.github.io`); HTTPS is mandatory except for `http://localhost` or `http://127.0.0.1` development origins. `PORT` defaults to 3000. Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` only when using a system Chromium.
 
 ```sh
 cd browser-bridge
