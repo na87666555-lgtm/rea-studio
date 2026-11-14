@@ -1,0 +1,9 @@
+{
+  "name": "rea-studio-browser-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": { "start": "node server.cjs", "test": "node --test test/*.test.cjs" },
+  "dependencies": { "playwright": "1.62.1" },
+  "engines": { "node": ">=20" }
+}

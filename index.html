@@ -24,6 +24,7 @@
       <div class="drawer-buttons">
         <button type="button" class="btn primary block" data-action="new-chat">+ नई चैट</button>
         <button type="button" class="btn team-entry block" data-action="new-team">✦ तीन AI · एक चैट</button>
+        <button type="button" class="btn block" data-action="official-browser">🌐 वेबसाइट लॉगिन</button>
         <button type="button" class="btn block" data-action="show-multi">⚡ एक साथ कई काम</button>
         <button type="button" class="btn block" data-action="show-settings">⚙ API और सेटिंग्स</button>
         <button type="button" class="btn block install-btn" data-action="install" hidden>📲 ऐप इंस्टॉल करें</button>
@@ -63,11 +64,15 @@
   <dialog id="teamDialog" class="dlg team-dialog">
     <form id="teamForm">
       <h2>✦ तीन AI · एक प्रोजेक्ट</h2>
-      <p class="hint">ये तीन काम की भूमिकाएँ हैं। हर भूमिका चुने हुए API पते और मॉडल नाम को अनुरोध भेजती है। मॉडल का नाम अपने आप उसकी असली पहचान सिद्ध नहीं करता। ChatGPT, Gemini या Claude वेबसाइट का लॉगिन इस ऐप से जुड़ा नहीं है।</p>
+      <label>तीनों से कैसे जुड़ें<select id="tdMode"><option value="api">मौजूदा API कनेक्शन से</option><option value="website">मेरे वेबसाइट खातों से (प्रायोगिक)</option></select></label>
+      <p id="teamApiHint" class="hint">ये तीन काम की भूमिकाएँ हैं। हर भूमिका चुने हुए API पते और मॉडल नाम को अनुरोध भेजती है। मॉडल का नाम अपने आप उसकी असली पहचान सिद्ध नहीं करता। वेबसाइट लॉगिन इस API मोड से जुड़ा नहीं है।</p>
+      <div id="teamWebsiteHint" hidden><p class="hint">वेबसाइट मोड में आपके निजी ब्राउज़र सेवा पर ChatGPT, Gemini और Claude की असली वेबसाइटें खुलेंगी। पहले हर खाते में लॉगिन करें। वेबसाइट का डिज़ाइन बदलने या लॉगिन रोके जाने पर काम रुक सकता है।</p><button type="button" class="btn" data-action="official-browser">🌐 तीनों वेबसाइटों में लॉगिन</button></div>
       <label>प्रोजेक्ट का नाम<input id="tdTitle" maxlength="100" placeholder="मेरा साझा प्रोजेक्ट"></label>
+      <div id="teamApiFields">
       <div id="teamMembers"></div>
       <button type="button" class="btn small" data-action="team-add-api">+ API कनेक्शन जोड़ें</button>
       <p class="hint">कनेक्शन का पता देख लें। “API से मॉडल जाँचें” पर उस मॉडल नाम से एक छोटा अनुरोध भेजा जाएगा; जवाब आना भी मॉडल की स्वतंत्र पहचान का प्रमाण नहीं है। हर सवाल पर कई API requests चलेंगी।</p>
+      </div>
       <label>साझा जवाब तैयार करे<select id="tdCoordinator"><option value="0">ChatGPT</option><option value="1">Gemini</option><option value="2" selected>Claude</option></select></label>
       <label>प्रोजेक्ट के साझा निर्देश<textarea id="tdSystem" rows="3" placeholder="उद्देश्य, ज़रूरतें और तीनों को याद रखने वाली बातें…"></textarea></label>
       <p id="tdStatus" class="hint" role="status"></p>
@@ -76,6 +81,25 @@
         <button type="submit" class="btn primary">टीम सेव करें</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="officialDialog" class="dlg official-dialog">
+    <div class="project-header"><h2>🌐 वेबसाइट लॉगिन</h2><button type="button" class="btn small" data-action="close-dialog">बंद करें</button></div>
+    <p class="hint">यह अलग ब्राउज़र सेवा पर चलता है। केवल अपनी भरोसेमंद सेवा का पता और पासकोड डालें; उस सेवा को आपके लॉगिन सत्र और स्क्रीन की पहुँच होगी।</p>
+    <label>आपकी ब्राउज़र सेवा का HTTPS पता<input id="officialUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://…"></label>
+    <label>ब्राउज़र सेवा का पासकोड<input id="officialToken" type="password" autocomplete="off" spellcheck="false"></label>
+    <div class="row wrap"><button type="button" class="btn primary" data-action="official-connect">सेवा जोड़ें</button><button type="button" class="btn danger" data-action="official-close-session">लॉगआउट और सत्र बंद</button></div>
+    <p id="officialStatus" class="hint" role="status">सेवा जोड़ने पर लॉगिन की स्क्रीन यहाँ खुलेगी।</p>
+    <div id="officialControls" hidden>
+      <div class="row wrap"><button type="button" class="btn small" data-action="official-site" data-site="chatgpt">ChatGPT</button><button type="button" class="btn small" data-action="official-site" data-site="gemini">Gemini</button><button type="button" class="btn small" data-action="official-site" data-site="claude">Claude</button></div>
+      <p id="officialSite" class="hint"></p>
+      <img id="officialScreen" class="official-screen" alt="चुनी वेबसाइट की स्क्रीन; टैप या स्वाइप करके नियंत्रण करें">
+      <div class="row wrap"><button type="button" class="btn small" data-action="official-refresh">↻ स्क्रीन ताज़ा</button><button type="button" class="btn small" data-action="official-up">↑ ऊपर</button><button type="button" class="btn small" data-action="official-down">↓ नीचे</button><button type="button" class="btn small" data-action="official-enter">↵ Enter</button><button type="button" class="btn small" data-action="official-backspace">⌫</button><button type="button" class="btn small" data-action="official-select-all">सब चुनें</button><button type="button" class="btn small" data-action="official-tab">Tab</button></div>
+      <label>चुनी हुई जगह पर लिखें <input id="officialText" type="password" autocomplete="off" spellcheck="false" placeholder="ईमेल, पासवर्ड या अन्य टेक्स्ट"></label>
+      <div class="row wrap"><button type="button" class="btn small" data-action="official-type">टेक्स्ट भेजें</button><button type="button" class="btn small" data-action="official-toggle">टेक्स्ट दिखाएँ</button><button type="button" class="btn small" data-action="official-reset">वेबसाइट फिर खोलें</button></div>
+      <button type="button" class="btn primary" data-action="official-ack">मैंने इस वेबसाइट में लॉगिन पूरा किया</button>
+      <p class="hint">तीनों वेबसाइटों पर लॉगिन के बाद बारी-बारी यह बटन दबाएँ। यह आपकी पुष्टि है; ऐप लॉगिन को स्वतंत्र रूप से सत्यापित नहीं करता। निष्क्रिय सत्र बंद होने पर फिर लॉगिन करना पड़ेगा।</p>
+    </div>
   </dialog>
 
   <dialog id="projectDialog" class="dlg project-dialog">

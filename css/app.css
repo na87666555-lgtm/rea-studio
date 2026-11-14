@@ -137,6 +137,9 @@ a { color: var(--accent); }
 .project-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .project-editor { width: 100%; min-height: 220px; font-family: var(--mono); font-size: 13px; tab-size: 2; }
 .project-preview { width: 100%; height: 360px; border: 1px solid var(--border); background: white; border-radius: 8px; margin-top: 12px; }
+.official-dialog { width: min(650px, calc(100vw - 20px)); }
+.official-screen { display: block; width: min(100%, 412px); height: auto; border: 1px solid var(--border); border-radius: 8px; margin: 8px auto; touch-action: none; cursor: pointer; }
+.official-screen[aria-busy="true"] { opacity: .65; pointer-events: none; }
 
 /* ---------- messages ---------- */
 .messages { flex: 1; overflow-y: auto; padding: 16px 12px 8px; display: flex; flex-direction: column; gap: 14px; }

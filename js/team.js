@@ -44,7 +44,7 @@ async function withDeadline(parent, work, timeoutMs) {
 }
 
 export async function runTeam({ members, coordinator = 2, system = '', getHistory, tools = [], executeTool,
-  signal, onMember, onPhase, onText, getWorkspace = () => '', turn = streamTurn, timeoutMs = 240000 }) {
+  signal, onMember, onPhase, onText, getWorkspace = () => '', afterMember = async () => {}, turn = streamTurn, timeoutMs = 240000 }) {
   const results = members.map(m => ({ label: m.label, model: m.model, provider: m.conn.name || m.conn.baseUrl || '', status: 'queued', text: '', steps: [] }));
   const update = i => onMember(i, { ...results[i], steps: results[i].steps.map(s => ({ ...s })) });
   onPhase('drafts');
@@ -72,7 +72,7 @@ export async function runTeam({ members, coordinator = 2, system = '', getHistor
             try {
               response = await turn({ conn: member.conn, model: member.model,
                 system: [system, `You are the ${member.label} contributor in a shared project team. ${member.role}`,
-                  'Perform only your assigned role on the same project. Use the shared handoff and project tools when relevant. Clearly identify uncertainty and failed work. Do not invent tool results. Reply in the user’s language.'].join('\n\n'),
+                  tools.length ? 'Perform only your assigned role on the same project. Use the shared handoff and project tools when relevant. Clearly identify uncertainty and failed work. Do not invent tool results. Reply in the user’s language.' : 'Perform only your assigned role on the same project. Use the shared handoff and supplied project files. You have no direct access to project tools in this browser workflow. Do not claim that you saved or executed files. Clearly identify uncertainty and failed work. Reply in the user’s language.'].join('\n\n'),
                 history, trail, tools: round < 4 ? activeTools : [], signal: childSignal,
                 onText: text => { r.text += text; update(i); },
               });
@@ -115,6 +115,10 @@ export async function runTeam({ members, coordinator = 2, system = '', getHistor
       r.status = signal.aborted ? 'stopped' : 'error';
       r.error = error.message || 'जवाब नहीं मिला।';
       for (const step of r.steps) if (step.status === 'working') step.status = r.status;
+    }
+    if (r.status === 'done' && !signal.aborted) {
+      try { await afterMember(i, r); }
+      catch (e) { r.notice = `फ़ाइलें सेव नहीं हो पाईं: ${e.message || 'त्रुटि'}`; }
     }
     update(i);
     if (signal.aborted) {
