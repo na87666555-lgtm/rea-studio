@@ -1,14 +1,16 @@
 import { loadSettings, saveSettings, loadChats, saveChats, clearAll, uid } from './store.js';
-import { PRESETS, FORMATS, streamChat, listModels, friendlyError, presetForKey, keyMismatch } from './providers.js';
+import { PRESETS, FORMATS, ApiError, streamChat, streamTurn, toolResultMessages, listModels, friendlyError, presetForKey, keyMismatch } from './providers.js';
+import { enabledTools, runTool, toolSystemPrompt, toolLabel, toolSettings } from './tools.js';
 import { renderMarkdown, escapeHtml } from './markdown.js';
 import { acquire, release } from './queue.js';
 
 // Bump together with version.json on every release.
-const APP_VERSION = '2026.11.14-2';
+const APP_VERSION = '2026.11.14-3';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const NEW_TITLE = 'नई चैट';
 const MAX_BATCH = 50;
+const MAX_TOOL_ROUNDS = 8;
 
 let settings = loadSettings();
 let chats = loadChats();
@@ -164,13 +166,19 @@ function messageHtml(chat, m, i) {
   }
   const r = running.get(chat.id);
   const isLast = i === chat.messages.length - 1;
-  let body = m.content ? renderMarkdown(m.content) : '';
-  if (m.pending && !m.content) {
-    body = r?.phase === 'queued'
-      ? '<div class="status-line">कतार में… (पहले से चल रहे काम खत्म होने का इंतज़ार)</div>'
-      : '<div class="typing" aria-label="लिख रहा है"><span></span><span></span><span></span></div>';
+  const parts = m.parts && m.parts.length ? m.parts : null;
+  let body = parts
+    ? parts.map((p, pi) => (p.type === 'text' ? renderMarkdown(p.text) : toolPartHtml(p, i, pi))).join('')
+    : m.content ? renderMarkdown(m.content) : '';
+  const lastPart = parts ? parts[parts.length - 1] : null;
+  if (m.pending && r?.phase === 'queued' && !m.content) {
+    body = '<div class="status-line">कतार में… (पहले से चल रहे काम खत्म होने का इंतज़ार)</div>';
+  } else if (m.pending && (!m.content || (lastPart && lastPart.type === 'tool'))) {
+    body += '<div class="typing" aria-label="लिख रहा है"><span></span><span></span><span></span></div>';
   }
   let extra = '';
+  if (m.toolsUnsupported) extra += '<div class="status-line">इस मॉडल ने टूल्स (खोज/कोड) स्वीकार नहीं किए, इसलिए बिना टूल्स के जवाब दिया।</div>';
+  if (m.toolLimit) extra += `<div class="status-line">टूल्स की सीमा (${MAX_TOOL_ROUNDS} बार) पूरी हो गई।</div>`;
   if (m.error) {
     extra += `<div class="err-box"><strong>${escapeHtml(m.error.title)}</strong>` +
       (m.error.detail ? `<div class="err-detail">${escapeHtml(m.error.detail)}</div>` : '') +
@@ -188,6 +196,19 @@ function messageHtml(chat, m, i) {
   }
   return `<div class="msg assistant" data-i="${i}"><div class="meta">${escapeHtml(m.model || chat.model || '')}</div>` +
     `<div class="content md">${body}</div>${extra}${actions}</div>`;
+}
+
+function toolPartHtml(p, mi, pi) {
+  const { icon, label, detail } = toolLabel(p.name, p.args || {});
+  const st = p.status === 'running'
+    ? '<span class="tool-spin" aria-label="चल रहा है"></span>'
+    : p.status === 'error' ? '<span class="tool-st err">✕</span>' : '<span class="tool-st ok">✓</span>';
+  const code = p.args && p.args.code ? `<div class="tool-label">कोड</div><pre>${escapeHtml(p.args.code)}</pre>` : '';
+  const out = p.output ? `<div class="tool-label">नतीजा</div><pre>${escapeHtml(p.output)}</pre>` : '';
+  return `<details class="tool" data-mi="${mi}" data-pi="${pi}"${p.open ? ' open' : ''}><summary>` +
+    `<span class="tool-ico">${icon}</span><span class="tool-name">${escapeHtml(label)}</span>` +
+    (detail ? `<span class="tool-detail">${escapeHtml(detail)}</span>` : '') + st +
+    `</summary><div class="tool-body">${code}${out}</div></details>`;
 }
 
 function nearBottom() {
@@ -277,20 +298,66 @@ async function runGeneration(chat) {
     acquired = true;
     state.phase = 'streaming';
     refreshStatus(chat);
-    const res = await streamChat({
-      conn: c,
-      model: chat.model,
-      system: chat.system || settings.systemPrompt,
-      messages: chat.messages.slice(0, -1),
-      signal: controller.signal,
-      onDelta: t => {
-        msg.content += t;
+    const tools = enabledTools(settings);
+    let useTools = tools.length > 0;
+    const baseSystem = chat.system || settings.systemPrompt || '';
+    const trail = [];
+    msg.parts = [];
+    const addText = t => {
+      const last = msg.parts[msg.parts.length - 1];
+      if (last && last.type === 'text') last.text += t;
+      else {
+        if (msg.content) msg.content += '\n\n';
+        msg.parts.push({ type: 'text', text: t });
+      }
+      msg.content += t;
+      markDirty(chat.id);
+      persistChats();
+    };
+    let res = null;
+    let rounds = 0;
+    while (true) {
+      const system = [baseSystem, useTools ? toolSystemPrompt(settings) : ''].filter(Boolean).join('\n\n');
+      try {
+        res = await streamTurn({
+          conn: c,
+          model: chat.model,
+          system,
+          history: chat.messages.slice(0, -1),
+          trail,
+          tools: useTools ? tools : null,
+          signal: controller.signal,
+          onText: addText,
+        });
+      } catch (e) {
+        // Some providers or models reject the `tools` field: answer without tools.
+        if (useTools && !trail.length && !msg.content && e instanceof ApiError && [400, 404, 422].includes(e.status)) {
+          useTools = false;
+          msg.toolsUnsupported = true;
+          continue;
+        }
+        throw e;
+      }
+      if (!res.toolCalls.length) break;
+      if (rounds >= MAX_TOOL_ROUNDS) { msg.toolLimit = true; break; }
+      rounds++;
+      trail.push(res.assistantMessage);
+      const results = [];
+      for (const call of res.toolCalls) {
+        const step = { type: 'tool', name: call.name, args: call.args || {}, status: 'running' };
+        msg.parts.push(step);
+        markDirty(chat.id);
+        const out = await runTool(call.name, call.args || {}, settings, controller.signal);
+        step.status = out.ok ? 'done' : 'error';
+        step.output = out.text.length > 4000 ? out.text.slice(0, 4000) + '…' : out.text;
+        results.push({ id: call.id, ok: out.ok, text: out.text });
         markDirty(chat.id);
         persistChats();
-      },
-    });
-    msg.stopReason = res.stopReason || null;
-    if (!msg.content && msg.stopReason !== 'refusal') msg.error = { title: 'मॉडल ने खाली जवाब दिया।', detail: '' };
+      }
+      trail.push(...toolResultMessages(c.format, results));
+    }
+    msg.stopReason = res?.stopReason || null;
+    if (!msg.content && msg.stopReason !== 'refusal' && !msg.toolLimit) msg.error = { title: 'मॉडल ने खाली जवाब दिया।', detail: '' };
   } catch (e) {
     if (e?.name === 'AbortError') msg.stopped = true;
     else {
@@ -653,6 +720,9 @@ function renderSettings() {
     <div class="conn-list">${settings.connections.length ? settings.connections.map(connCard).join('') : '<p class="muted">अभी कोई API नहीं जोड़ा गया।</p>'}</div>
     <button type="button" class="btn primary" data-action="add-conn">+ नया API जोड़ें</button>
 
+    <h2>🛠 टूल्स (खोज और कोड)</h2>
+    ${toolSettingsHtml()}
+
     <h2>सभी चैट के लिए डिफ़ॉल्ट निर्देश</h2>
     <textarea id="globalSystem" rows="3" placeholder="जैसे: हमेशा आसान हिंदी में जवाब दो।">${escapeHtml(settings.systemPrompt || '')}</textarea>
 
@@ -669,10 +739,40 @@ function renderSettings() {
     </div>
     <p class="muted small">बैकअप फ़ाइल में API keys नहीं होतीं।</p>
   </div>`;
+  v.querySelectorAll('[data-tool]').forEach(el => el.addEventListener('change', () => {
+    settings.tools = { ...toolSettings(settings), [el.dataset.tool]: el.checked };
+    persistSettings();
+    renderSettings();
+  }));
+  v.querySelectorAll('[data-toolkey]').forEach(el => el.addEventListener('input', () => {
+    settings.tools = { ...toolSettings(settings), [el.dataset.toolkey]: el.value.trim() };
+    persistSettings();
+  }));
   $('#globalSystem').addEventListener('input', e => {
     settings.systemPrompt = e.target.value;
     persistSettings();
   });
+}
+
+function toolSettingsHtml() {
+  const t = toolSettings(settings);
+  const box = (key, text) => `<label class="check"><input type="checkbox" data-tool="${key}"${t[key] ? ' checked' : ''}${key !== 'enabled' && !t.enabled ? ' disabled' : ''}> ${text}</label>`;
+  return `<div class="tools-box">
+    ${box('enabled', '<strong>टूल्स चालू</strong>')}
+    <div class="tool-toggles">
+      ${box('search', '🔎 वेब खोज')}
+      ${box('read', '📄 वेब पेज पढ़ना')}
+      ${box('js', '▶ JavaScript चलाना')}
+      ${box('python', '🐍 Python चलाना')}
+    </div>
+    <label>Tavily key (पूरे इंटरनेट की खोज के लिए, वैकल्पिक)
+      <input type="password" data-toolkey="tavilyKey" value="${escapeHtml(t.tavilyKey)}" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="tvly-…">
+    </label>
+    <label>Jina key (वैकल्पिक)
+      <input type="password" data-toolkey="jinaKey" value="${escapeHtml(t.jinaKey)}" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="jina_…">
+    </label>
+    <p class="muted small">बिना key के खोज सिर्फ Wikipedia में होती है। tavily.com या jina.ai पर मुफ्त key मिलती है। कोड आपके फ़ोन में ही, एक अलग सुरक्षित हिस्से में चलता है।</p>
+  </div>`;
 }
 
 function exportChats() {
@@ -817,7 +917,7 @@ function safeToReload() {
 }
 
 const APP_FILES = ['./', 'index.html', 'css/app.css', 'js/app.js', 'js/store.js', 'js/providers.js',
-  'js/markdown.js', 'js/queue.js', 'manifest.webmanifest', 'sw.js'];
+  'js/markdown.js', 'js/queue.js', 'js/tools.js', 'js/run-worker.js', 'js/py-worker.js', 'manifest.webmanifest', 'sw.js'];
 
 let updating = false;
 async function applyUpdate(version) {
@@ -1024,6 +1124,12 @@ function init() {
   fitPhoneInDesktopMode();
   window.addEventListener('resize', fitPhoneInDesktopMode);
   document.addEventListener('click', onClick);
+  document.addEventListener('toggle', e => {
+    const d = e.target;
+    if (!(d instanceof HTMLDetailsElement) || !d.classList.contains('tool')) return;
+    const part = current()?.messages[Number(d.dataset.mi)]?.parts?.[Number(d.dataset.pi)];
+    if (part) part.open = d.open;
+  }, true);
   $('#composer').addEventListener('submit', onSubmit);
   const input = $('#input');
   input.addEventListener('input', autosize);

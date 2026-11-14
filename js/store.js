@@ -24,6 +24,7 @@ export function loadSettings() {
     connections: Array.isArray(s.connections) ? s.connections : [],
     defaultConnectionId: s.defaultConnectionId || null,
     systemPrompt: typeof s.systemPrompt === 'string' ? s.systemPrompt : '',
+    tools: s.tools && typeof s.tools === 'object' ? s.tools : {},
   };
 }
 

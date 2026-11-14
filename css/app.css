@@ -300,3 +300,34 @@ html.force-mobile .scrim:not([hidden]) { display: block !important; }
 html.force-mobile .chip { max-width: 190px; }
 html.force-mobile .dlg { width: 390px; max-width: none; max-height: calc(var(--app-h) - 40px); }
 html.force-mobile .toast { max-width: 360px; }
+
+/* tools */
+details.tool {
+  border: 1px solid var(--border); border-radius: 10px; background: var(--panel);
+  margin: 6px 0 10px; font-size: 14px;
+}
+details.tool summary {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px; cursor: pointer; list-style: none;
+}
+details.tool summary::-webkit-details-marker { display: none; }
+.tool-ico { flex-shrink: 0; }
+.tool-name { font-weight: 600; flex-shrink: 0; }
+.tool-detail { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.tool-st { margin-left: auto; flex-shrink: 0; }
+.tool-st.ok { color: var(--ok); }
+.tool-st.err { color: var(--danger); }
+.tool-spin {
+  margin-left: auto; flex-shrink: 0; width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid var(--border); border-top-color: var(--accent); animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.tool-body { padding: 0 10px 10px; }
+.tool-label { font-size: 12px; color: var(--muted); margin: 6px 0 2px; }
+.tool-body pre {
+  margin: 0; padding: 8px 10px; background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+  font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow-y: auto;
+}
+.tools-box { display: flex; flex-direction: column; gap: 10px; }
+.tool-toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+label.check { flex-direction: row; align-items: center; gap: 8px; color: var(--text); font-size: 15px; }
+input[type=checkbox] { width: 20px; height: 20px; padding: 0; flex-shrink: 0; accent-color: var(--accent); }

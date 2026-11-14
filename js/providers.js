@@ -215,26 +215,63 @@ function normalize(messages) {
   return out;
 }
 
-function textFromJson(conn, j) {
-  if (conn.format === 'anthropic') {
-    const text = (j.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
-    return { text, stopReason: j.stop_reason || null };
+function parseArgs(s) {
+  if (!s || !String(s).trim()) return {};
+  try {
+    const v = JSON.parse(s);
+    return v && typeof v === 'object' ? v : {};
+  } catch {
+    return { _raw: String(s) };
   }
-  const c = j.choices?.[0];
-  return { text: c?.message?.content || '', stopReason: c?.finish_reason || null };
 }
 
-export async function streamChat({ conn, model, system, messages, signal, onDelta }) {
-  const msgs = normalize(messages);
+// Builds the provider-native messages that report tool results back.
+export function toolResultMessages(format, results) {
+  if (format === 'anthropic') {
+    return [{
+      role: 'user',
+      content: results.map(r => ({ type: 'tool_result', tool_use_id: r.id, content: r.text, ...(r.ok ? {} : { is_error: true }) })),
+    }];
+  }
+  return results.map(r => ({ role: 'tool', tool_call_id: r.id, content: r.text }));
+}
+
+function fromJson(conn, j) {
+  if (conn.format === 'anthropic') {
+    const content = (j.content || []).filter(b => b.type !== 'text' || b.text);
+    const text = content.filter(b => b.type === 'text').map(b => b.text).join('');
+    const toolCalls = content.filter(b => b.type === 'tool_use').map(b => ({ id: b.id, name: b.name, args: b.input || {} }));
+    return { text, toolCalls, stopReason: j.stop_reason || null, assistantMessage: { role: 'assistant', content } };
+  }
+  const c = j.choices?.[0];
+  const m = c?.message || {};
+  const calls = (m.tool_calls || []).map(tc => ({ id: tc.id, name: tc.function?.name, args: parseArgs(tc.function?.arguments) }));
+  const assistantMessage = { role: 'assistant', content: m.content || null };
+  if (m.tool_calls?.length) assistantMessage.tool_calls = m.tool_calls;
+  return { text: m.content || '', toolCalls: calls, stopReason: c?.finish_reason || null, assistantMessage };
+}
+
+// One request to the model. `history` is the chat as {role, content} text
+// turns; `trail` holds provider-native messages from earlier tool rounds of
+// this same reply. Returns the text, any tool calls the model made, and the
+// assistant message to append to the trail before sending tool results.
+export async function streamTurn({ conn, model, system, history, trail = [], tools = null, signal, onText }) {
+  const msgs = normalize(history);
   if (!msgs.length) throw new ApiError('भेजने के लिए कोई संदेश नहीं है।', 0, '');
   const sys = (system || '').trim();
+  const anth = conn.format === 'anthropic';
   let body;
-  if (conn.format === 'anthropic') {
-    body = { model, max_tokens: Number(conn.maxTokens) || 16000, messages: msgs, stream: true };
+  if (anth) {
+    body = { model, max_tokens: Number(conn.maxTokens) || 16000, messages: msgs.concat(trail), stream: true };
     if (sys) body.system = sys;
+    if (tools?.length) body.tools = tools.map(t => ({ name: t.name, description: t.description, input_schema: t.parameters }));
   } else {
-    body = { model, messages: (sys ? [{ role: 'system', content: sys }] : []).concat(msgs), stream: true };
+    body = { model, messages: (sys ? [{ role: 'system', content: sys }] : []).concat(msgs, trail), stream: true };
     if (Number(conn.maxTokens) > 0) body.max_tokens = Number(conn.maxTokens);
+    if (tools?.length) {
+      body.tools = tools.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }));
+      body.tool_choice = 'auto';
+    }
   }
 
   const res = await fetch(endpoints(conn).chat, {
@@ -250,12 +287,17 @@ export async function streamChat({ conn, model, system, messages, signal, onDelt
     // Some providers ignore `stream: true` and answer with plain JSON.
     const j = await res.json();
     if (j.error) throw new ApiError('Provider ने त्रुटि भेजी।', 0, j.error.message || JSON.stringify(j.error));
-    const { text, stopReason } = textFromJson(conn, j);
-    if (text) onDelta(text);
-    return { stopReason };
+    const r = fromJson(conn, j);
+    if (r.text) onText(r.text);
+    return r;
   }
 
   let stopReason = null;
+  let text = '';
+  const blocks = []; // anthropic content blocks, by index
+  const calls = []; // openai tool calls, by index
+  const emit = t => { text += t; onText(t); };
+
   for await (const ev of sseEvents(res)) {
     if (ev.data === '[DONE]') break;
     let j;
@@ -264,9 +306,25 @@ export async function streamChat({ conn, model, system, messages, signal, onDelt
     } catch {
       continue;
     }
-    if (conn.format === 'anthropic') {
-      if (j.type === 'content_block_delta' && j.delta?.type === 'text_delta') {
-        if (j.delta.text) onDelta(j.delta.text);
+    if (anth) {
+      if (j.type === 'content_block_start') {
+        const b = { ...j.content_block };
+        if (b.type === 'tool_use') { b.input = {}; b._json = ''; }
+        if (b.type === 'text') b.text = '';
+        if (b.type === 'thinking') { b.thinking = b.thinking || ''; b.signature = b.signature || ''; }
+        blocks[j.index] = b;
+      } else if (j.type === 'content_block_delta') {
+        const b = blocks[j.index];
+        const d = j.delta || {};
+        if (d.type === 'text_delta') {
+          if (b) b.text += d.text || '';
+          if (d.text) emit(d.text);
+        } else if (b && d.type === 'input_json_delta') b._json += d.partial_json || '';
+        else if (b && d.type === 'thinking_delta') b.thinking += d.thinking || '';
+        else if (b && d.type === 'signature_delta') b.signature += d.signature || '';
+      } else if (j.type === 'content_block_stop') {
+        const b = blocks[j.index];
+        if (b && b.type === 'tool_use') { b.input = parseArgs(b._json); delete b._json; }
       } else if (j.type === 'message_delta') {
         stopReason = j.delta?.stop_reason || stopReason;
       } else if (j.type === 'error') {
@@ -275,18 +333,43 @@ export async function streamChat({ conn, model, system, messages, signal, onDelt
       } else if (j.type === 'message_stop') {
         break;
       }
-      // thinking blocks and other event types are intentionally ignored
     } else {
       if (j.error) {
         throw new ApiError('Provider ने जवाब के बीच में त्रुटि भेजी।', 0, j.error.message || JSON.stringify(j.error));
       }
       const c = j.choices?.[0];
-      const t = c?.delta?.content;
-      if (typeof t === 'string' && t) onDelta(t);
+      const d = c?.delta || {};
+      if (typeof d.content === 'string' && d.content) emit(d.content);
+      for (const tc of d.tool_calls || []) {
+        const i = tc.index ?? calls.length;
+        const call = (calls[i] ||= { id: '', name: '', args: '' });
+        if (tc.id) call.id = tc.id;
+        if (tc.function?.name) call.name += tc.function.name;
+        if (tc.function?.arguments) call.args += tc.function.arguments;
+      }
       if (c?.finish_reason) stopReason = c.finish_reason;
     }
   }
-  return { stopReason };
+
+  if (anth) {
+    const content = blocks.filter(b => b && (b.type !== 'text' || b.text));
+    for (const b of content) if (b.type === 'tool_use' && b._json !== undefined) { b.input = parseArgs(b._json); delete b._json; }
+    const toolCalls = content.filter(b => b.type === 'tool_use').map(b => ({ id: b.id, name: b.name, args: b.input || {} }));
+    return { text, toolCalls, stopReason, assistantMessage: { role: 'assistant', content } };
+  }
+  const list = calls.filter(c => c && c.name);
+  list.forEach((c, i) => { if (!c.id) c.id = `call_${Date.now().toString(36)}_${i}`; });
+  const assistantMessage = { role: 'assistant', content: text || null };
+  if (list.length) {
+    assistantMessage.tool_calls = list.map(c => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.args || '{}' } }));
+  }
+  return { text, toolCalls: list.map(c => ({ id: c.id, name: c.name, args: parseArgs(c.args) })), stopReason, assistantMessage };
+}
+
+// Plain streaming chat without tools (used by the connection test).
+export async function streamChat({ conn, model, system, messages, signal, onDelta }) {
+  const r = await streamTurn({ conn, model, system, history: messages, signal, onText: onDelta });
+  return { stopReason: r.stopReason };
 }
 
 export async function listModels(conn, signal) {

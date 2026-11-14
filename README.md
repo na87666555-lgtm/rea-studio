@@ -10,6 +10,12 @@
 - **कई चैट एक साथ:** एक चैट का जवाब आ रहा हो, तब भी दूसरी चैट खोलकर नया सवाल भेज सकते हैं।
 - **⚡ एक साथ कई काम:** हर लाइन में एक काम लिखें। सब अलग-अलग चैट में एक साथ चलते हैं, एक बार में 50 तक। हर API की "एक साथ कितनी requests" सीमा से ज़्यादा काम कतार में रुककर अपनी बारी पर चलते हैं।
 - **मॉडलों की तुलना:** एक ही काम को कई मॉडलों या कई providers पर एक साथ चला सकते हैं।
+- **🛠 टूल्स (Claude जैसी क्षमताएँ):** मॉडल जवाब देते समय खुद ये टूल इस्तेमाल कर सकता है:
+  - 🔎 **वेब खोज:** बिना key के Wikipedia में खोजता है। Tavily या Jina की मुफ्त key डालने पर पूरे इंटरनेट में खोजता है।
+  - 📄 **वेब पेज पढ़ना:** किसी भी link का मुख्य text पढ़ता है (r.jina.ai के ज़रिए)।
+  - ▶ **JavaScript** और 🐍 **Python** चलाना: Python (Pyodide) पहली बार लगभग 10 MB download करता है। कोड फ़ोन में ही एक अलग worker में चलता है, जहाँ से API keys नहीं पढ़ी जा सकतीं।
+  - हर टूल का कदम चैट में दिखता है, और उसे दबाने पर कोड और नतीजा खुल जाता है। सेटिंग्स में हर टूल को अलग से बंद किया जा सकता है।
+  - जिस मॉडल या provider में टूल्स नहीं चलते, वहाँ ऐप अपने आप बिना टूल्स के जवाब ले लेता है।
 - **फ़ोन पर install:** होम स्क्रीन पर ऐप की तरह लगता है, और बिना इंटरनेट के भी खुल जाता है (जवाब के लिए इंटरनेट चाहिए)।
 - **Keys आपके फ़ोन में:** keys सिर्फ इसी फ़ोन के ब्राउज़र में सेव रहती हैं। कोई बीच का server नहीं है।
 
@@ -36,6 +42,7 @@
 
 - कुछ providers ब्राउज़र से सीधी request (CORS) स्वीकार नहीं करते। तब "नेटवर्क त्रुटि" दिखेगी, और ऐसा provider इस ऐप में नहीं चलेगा।
 - फ़ोन पर ऐप बंद करने या लंबे समय तक background में रखने पर चल रहे जवाब बीच में रुक सकते हैं।
+- टूल्स इस्तेमाल होने पर खोज के शब्द Wikipedia, Tavily या Jina को जाते हैं, पढ़े जाने वाले link r.jina.ai को जाते हैं, और Python jsDelivr से download होता है।
 - Keys फ़ोन के ब्राउज़र storage में रहती हैं, इसलिए फ़ोन सुरक्षित रखें। सेटिंग्स में **सब कुछ हटाएँ** दबाने से सारी keys और चैट मिट जाती हैं।
 - Base URL में सिर्फ `https://` वाले पते मान्य हैं (अपने फ़ोन पर चल रहे `localhost` को छोड़कर)।
 
@@ -47,6 +54,7 @@
 | `css/app.css` | डिज़ाइन (dark/light दोनों) |
 | `js/app.js` | चैट, सेटिंग्स, एक साथ कई काम |
 | `js/providers.js` | OpenAI-जैसे और Anthropic-जैसे API से streaming बातचीत |
+| `js/tools.js`, `js/run-worker.js`, `js/py-worker.js` | वेब खोज, पेज पढ़ना, JavaScript और Python चलाना |
 | `js/queue.js` | हर API के लिए एक साथ चलने वाली requests की सीमा |
 | `js/markdown.js` | जवाबों का सुरक्षित Markdown रूप (HTML/script नहीं चलने देता) |
 | `js/store.js` | फ़ोन के ब्राउज़र में सेव करना |
@@ -60,4 +68,4 @@
 
 ## English summary
 
-Rea Studio is a dependency-free, installable web app (PWA) for chatting with any AI provider using your own API key. It speaks both the OpenAI-style `/chat/completions` and the Anthropic-style `/v1/messages` streaming formats, so it works with Anthropic, OpenAI, OpenRouter, Gemini, Groq, DeepSeek, Mistral, xAI, Together, Coarena, or any compatible endpoint. Many chats can stream at once, and the multi-task screen fans a list of tasks out across one or more models, with a per-connection concurrency limit. Keys stay in the browser's `localStorage` and are sent only to the configured base URL. There is no build step: serve the repository root as static files (for example with GitHub Pages).
+Rea Studio is a dependency-free, installable web app (PWA) for chatting with any AI provider using your own API key. It speaks both the OpenAI-style `/chat/completions` and the Anthropic-style `/v1/messages` streaming formats, so it works with Anthropic, OpenAI, OpenRouter, Gemini, Groq, DeepSeek, Mistral, xAI, Together, Coarena, or any compatible endpoint. The model can call tools while answering: web search (Wikipedia without a key, or Tavily/Jina with one), reading a web page (via r.jina.ai), and running JavaScript or Python (Pyodide) in sandboxed workers that can't read the stored keys; tool calls stream for both API formats, and providers that reject tools fall back to plain chat. Many chats can stream at once, and the multi-task screen fans a list of tasks out across one or more models, with a per-connection concurrency limit. Keys stay in the browser's `localStorage` and are sent only to the configured base URL. There is no build step: serve the repository root as static files (for example with GitHub Pages).
