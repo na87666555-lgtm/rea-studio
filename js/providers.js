@@ -8,25 +8,16 @@ export const FORMATS = {
   anthropic: 'Anthropic-जैसा (messages)',
 };
 
-const COARENA_MODELS = [
-  'claude-fable-5', 'claude-fable-5-1', 'claude-fable-5-2', 'claude-haiku-5-5',
-  'claude-opus-5-5', 'claude-sonnet-5-5', 'deepseek-v4-1-flash-1017', 'gemini-3-8-flash',
-  'gemini-4-argon', 'gemini-4-carbon', 'glm-5-3-flash', 'gpt-6-1-sol', 'gpt-6-1-terra',
-  'gpt-6-astra', 'gpt-6-luna', 'grok-4-7', 'hy4', 'kimi-k3', 'kimi-k3-1-pro',
-  'mimo-v2-6-pro', 'minimax-m3-1-flash', 'qwen3-8-2-4t-a95b',
-];
-
 export const PRESETS = [
   {
     id: 'coarena', name: 'Coarena', format: 'openai', baseUrl: 'https://coarena.ai/api/v1', keyPrefix: 'coa_',
-    models: COARENA_MODELS, defaultModel: 'claude-sonnet-5-5', maxParallel: 2,
+    maxParallel: 2,
     hint: 'Coarena के docs: रोज़ $5 तक मुफ्त, एक मिनट में 30 और एक साथ 2 requests। यह site आपके requests का रिकॉर्ड रखती है — निजी जानकारी न डालें।',
   },
   {
     id: 'anthropic', name: 'Anthropic (Claude)', format: 'anthropic',
     baseUrl: 'https://api.anthropic.com', anthropicVersion: '2026-10-21', keyPrefix: 'sk-ant-',
-    models: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-2'],
-    defaultModel: 'claude-sonnet-5-5', maxTokens: 64000, maxParallel: 4,
+    maxTokens: 64000, maxParallel: 4,
     hint: 'Key: platform.claude.com → API Keys। यह API अलग से billed होता है।',
   },
   {

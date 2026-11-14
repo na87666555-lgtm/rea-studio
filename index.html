@@ -63,11 +63,11 @@
   <dialog id="teamDialog" class="dlg team-dialog">
     <form id="teamForm">
       <h2>✦ तीन AI · एक प्रोजेक्ट</h2>
-      <p class="hint">ChatGPT योजना बनाएगा, Gemini साझा प्रोजेक्ट में काम करेगा और Claude उसकी जाँच करेगा। फिर एक साझा जवाब मिलेगा।</p>
+      <p class="hint">ये तीन काम की भूमिकाएँ हैं। हर भूमिका चुने हुए API पते और मॉडल नाम को अनुरोध भेजती है। मॉडल का नाम अपने आप उसकी असली पहचान सिद्ध नहीं करता। ChatGPT, Gemini या Claude वेबसाइट का लॉगिन इस ऐप से जुड़ा नहीं है।</p>
       <label>प्रोजेक्ट का नाम<input id="tdTitle" maxlength="100" placeholder="मेरा साझा प्रोजेक्ट"></label>
       <div id="teamMembers"></div>
       <button type="button" class="btn small" data-action="team-add-api">+ API कनेक्शन जोड़ें</button>
-      <p class="hint">हर सदस्य के लिए उसका मॉडल चुनें। एक ऐसा API भी चुन सकते हैं जिसमें तीनों के मॉडल हों। हर सवाल पर तीन योगदान और एक साझा जवाब के लिए API requests चलेंगी।</p>
+      <p class="hint">कनेक्शन का पता देख लें। “API से मॉडल जाँचें” पर उस मॉडल नाम से एक छोटा अनुरोध भेजा जाएगा; जवाब आना भी मॉडल की स्वतंत्र पहचान का प्रमाण नहीं है। हर सवाल पर कई API requests चलेंगी।</p>
       <label>साझा जवाब तैयार करे<select id="tdCoordinator"><option value="0">ChatGPT</option><option value="1">Gemini</option><option value="2" selected>Claude</option></select></label>
       <label>प्रोजेक्ट के साझा निर्देश<textarea id="tdSystem" rows="3" placeholder="उद्देश्य, ज़रूरतें और तीनों को याद रखने वाली बातें…"></textarea></label>
       <p id="tdStatus" class="hint" role="status"></p>

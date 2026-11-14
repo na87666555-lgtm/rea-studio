@@ -45,7 +45,7 @@ async function withDeadline(parent, work, timeoutMs) {
 
 export async function runTeam({ members, coordinator = 2, system = '', getHistory, tools = [], executeTool,
   signal, onMember, onPhase, onText, getWorkspace = () => '', turn = streamTurn, timeoutMs = 240000 }) {
-  const results = members.map(m => ({ label: m.label, model: m.model, status: 'queued', text: '', steps: [] }));
+  const results = members.map(m => ({ label: m.label, model: m.model, provider: m.conn.name || m.conn.baseUrl || '', status: 'queued', text: '', steps: [] }));
   const update = i => onMember(i, { ...results[i], steps: results[i].steps.map(s => ({ ...s })) });
   onPhase('drafts');
   results.forEach((_, i) => update(i));

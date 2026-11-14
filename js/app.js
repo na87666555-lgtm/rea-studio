@@ -8,7 +8,7 @@ import { TEAM_ROLES, suggestTeam, resolveTeam, runTeam } from './team.js';
 import { PROJECT_TOOLS, filesOf, writeProject, projectTool, projectContext, previewDocument } from './project.js';
 
 // Bump together with version.json on every release.
-const APP_VERSION = '2026.11.14-6';
+const APP_VERSION = '2026.11.14-7';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const NEW_TITLE = 'नई चैट';
@@ -222,7 +222,7 @@ function teamProgressHtml(m, i) {
   const phase = { drafts: 'योजना → निर्माण → जाँच', synthesis: 'साझा परिणाम तैयार हो रहा है', done: 'साझा जवाब तैयार', stopped: 'काम रुक गया', error: 'साझा जवाब पूरा नहीं हुआ' };
   const completed = m.teamRuns.filter(r => r?.status === 'done').length;
   return `<div class="team-progress"><div class="team-status">${phase[m.teamPhase] || 'टीम तैयारी कर रही है'} · ${completed}/3 योगदान</div>
-    <div class="team-badges">${m.teamRuns.map(r => `<span class="team-badge ${escapeHtml(r.status)}"><strong>${escapeHtml(r.label)}</strong><span>${labels[r.status] || 'तैयारी'}</span></span>`).join('')}</div>
+    <div class="team-badges">${m.teamRuns.map(r => `<span class="team-badge ${escapeHtml(r.status)}"><strong>${escapeHtml(r.label)} भूमिका</strong><span>${escapeHtml(r.model || '')}</span><span>${escapeHtml(r.provider || '')}</span><span>${labels[r.status] || 'तैयारी'}</span></span>`).join('')}</div>
     <details class="team-contributions" data-mi="${i}"${m.teamOpen ? ' open' : ''}><summary>तीनों का योगदान देखें</summary>
     ${m.teamRuns.map((r,i) => `<article class="team-contribution"><h3>${escapeHtml(r.label)} · ${['योजना','निर्माण','जाँच'][i]} <small>${escapeHtml(r.model)}</small></h3>
       ${r.error ? `<p class="err-box">${escapeHtml(r.error)}</p>` : ''}${r.notice ? `<p class="hint">${escapeHtml(r.notice)}</p>` : ''}
@@ -677,12 +677,13 @@ function readTeamDraft() {
 function renderTeamMembers() {
   $('#teamMembers').innerHTML = teamDraft.members.map((m, i) => {
     const c = conn(m.connectionId);
-    return `<fieldset class="team-member"><legend>${TEAM_ROLES[i].label}</legend>
+    return `<fieldset class="team-member"><legend>${TEAM_ROLES[i].label} की भूमिका</legend>
       <label>API कनेक्शन<select id="tdConn${i}" data-team-conn="${i}" required>
         <option value="">कनेक्शन चुनें</option>${settings.connections.map(c => `<option value="${escapeHtml(c.id)}"${c.id === m.connectionId ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}</select></label>
       <label>मॉडल<input id="tdModel${i}" list="tdModels${i}" value="${escapeHtml(m.model)}" required autocomplete="off" spellcheck="false" placeholder="${TEAM_ROLES[i].label} मॉडल का नाम"></label>
       <datalist id="tdModels${i}">${(c?.models || []).map(model => `<option value="${escapeHtml(model)}"></option>`).join('')}</datalist>
-      <button type="button" class="btn small" data-action="team-fetch" data-i="${i}">↻ मॉडल लिस्ट लाओ</button></fieldset>`;
+      <p class="hint">अनुरोध का API पता: ${escapeHtml(c?.baseUrl || 'पहले कनेक्शन चुनें')}<br>मॉडल का नाम चुना या पहले से भरा हो सकता है; उसकी पहचान अभी सत्यापित नहीं है।</p>
+      <div class="row wrap"><button type="button" class="btn small" data-action="team-fetch" data-i="${i}">↻ API से मॉडल सूची लाओ</button><button type="button" class="btn small" data-action="team-test" data-i="${i}">✓ API से मॉडल जाँचें</button></div><p class="hint" id="tdCheck${i}" role="status"></p></fieldset>`;
   }).join('');
 }
 
@@ -700,9 +701,9 @@ function openTeamDialog(chat = null) {
 
 async function fetchTeamModels(i, button) {
   const c = conn($(`#tdConn${i}`).value);
-  if (!c) { $('#tdStatus').textContent = 'पहले API कनेक्शन चुनें।'; return; }
+  if (!c) { setTeamStatus(i, 'पहले API कनेक्शन चुनें।'); return; }
   button.disabled = true;
-  $('#tdStatus').textContent = 'मॉडल लिस्ट आ रही है…';
+  setTeamStatus(i, 'मॉडल लिस्ट आ रही है…');
   try {
     const models = await listModels(c, AbortSignal.timeout(30000));
     c.models = models; persistSettings();
@@ -710,8 +711,29 @@ async function fetchTeamModels(i, button) {
     if ($(`#tdConn${i}`).value !== c.id) return;
     $(`#tdModels${i}`).innerHTML = models.map(m => `<option value="${escapeHtml(m)}"></option>`).join('');
     if (!$(`#tdModel${i}`).value) $(`#tdModel${i}`).value = models.find(m => TEAM_ROLES[i].match.test(m)) || '';
-    $('#tdStatus').textContent = `${models.length} मॉडल मिले। मॉडल वाले खाने से चुनें।`;
-  } catch (error) { $('#tdStatus').textContent = friendlyError(error).title; }
+    const selected = $(`#tdModel${i}`).value.trim();
+    setTeamStatus(i, `${c.name}: API से ${models.length} मॉडल नाम मिले। ${selected && !models.includes(selected) ? `चुना नाम "${selected}" इस सूची में नहीं है।` : selected ? 'चुना नाम सूची में है। यह मॉडल की स्वतंत्र पहचान की पुष्टि नहीं करता।' : 'मॉडल वाले खाने से नाम चुनें।'}`);
+  } catch (error) { setTeamStatus(i, friendlyError(error).title); }
+  finally { button.disabled = false; }
+}
+
+function setTeamStatus(i, message) {
+  $('#tdStatus').textContent = message;
+  const local = $(`#tdCheck${i}`);
+  if (local) local.textContent = message;
+}
+
+async function testTeamModel(i, button) {
+  const c = conn($(`#tdConn${i}`).value);
+  const model = $(`#tdModel${i}`).value.trim();
+  if (!c || !model) { setTeamStatus(i, 'पहले API कनेक्शन और मॉडल नाम चुनें।'); return; }
+  button.disabled = true;
+  setTeamStatus(i, `${c.name} से ${model} का जवाब जाँच रहे हैं…`);
+  try {
+    let answer = '';
+    await streamChat({ conn: c, model, system: '', messages: [{ role: 'user', content: 'Reply with the word OK.' }], signal: AbortSignal.timeout(30000), onDelta: t => { answer += t; } });
+    setTeamStatus(i, answer.trim() ? `${c.name} ने ${model} नाम वाले अनुरोध पर जवाब दिया। API ने वास्तव में कौन-सा मॉडल चलाया, इसकी स्वतंत्र पुष्टि इससे नहीं होती।` : `${c.name} से खाली जवाब मिला।`);
+  } catch (error) { setTeamStatus(i, `${c.name}: ${friendlyError(error).title}`); }
   finally { button.disabled = false; }
 }
 
@@ -1316,6 +1338,7 @@ function onClick(e) {
     case 'new-team': closeDrawer(); openTeamDialog(); break;
     case 'team-add-api': readTeamDraft(); openConnDialog(null); break;
     case 'team-fetch': fetchTeamModels(Number(b.dataset.i), b); break;
+    case 'team-test': testTeamModel(Number(b.dataset.i), b); break;
     case 'open-drawer': openDrawer(); break;
     case 'close-drawer': closeDrawer(); break;
     case 'new-chat': {

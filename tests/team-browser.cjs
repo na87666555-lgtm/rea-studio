@@ -29,6 +29,7 @@ async function main() {
     const calls = []; let failGemini = false; let hold = false; let claudeSawFile = false; let synthesisSawFile = false;
     await page.route('https://*.test/**', async route => {
       if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' } });
+      if (route.request().method() === 'GET') return route.fulfill({ json: { data: [{ id: 'gemini-test' }, { id: 'gpt-test' }, { id: 'claude-test' }] } });
       const body = route.request().postDataJSON(); calls.push(body);
       if (hold) { await new Promise(r => setTimeout(r, 300)); }
       const anth = route.request().url().includes('anthropic.test');
@@ -71,6 +72,16 @@ async function main() {
     await page.locator('.welcome [data-action="new-team"]').click();
     await page.locator('#tdTitle').fill('सोलर प्रोजेक्ट');
     await page.locator('#tdSystem').fill('बजट ₹50,000 है। आसान हिंदी में जवाब दें।');
+    assert.ok((await page.locator('#teamMembers').innerText()).includes('https://gemini.test/v1'));
+    await page.locator('#tdModel1').fill('not-a-listed-model');
+    await page.locator('[data-action="team-fetch"]').nth(1).click();
+    await page.waitForFunction(() => document.querySelector('#tdCheck1').textContent.includes('इस सूची में नहीं है'));
+    assert.ok((await page.locator('#tdCheck1').innerText()).includes('इस सूची में नहीं है'));
+    await page.locator('#tdModel1').fill('gemini-test');
+    await page.locator('[data-action="team-test"]').nth(1).click();
+    await page.waitForFunction(() => document.querySelector('#tdCheck1').textContent.includes('अनुरोध पर जवाब दिया'));
+    assert.ok((await page.locator('#tdCheck1').innerText()).includes('स्वतंत्र पुष्टि'));
+    calls.length = 0;
     await page.locator('#teamForm [type="submit"]').click();
     await page.locator('#fileInput').setInputFiles({ name: 'requirements.txt', mimeType: 'text/plain', buffer: Buffer.from('Shared requirement: rooftop is 100 square metres.') });
     await page.waitForFunction(() => !document.querySelector('.att-chip .tool-spin'));
