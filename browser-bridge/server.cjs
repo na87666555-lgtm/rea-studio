@@ -11,7 +11,7 @@ const { SERVICES, assertOfficialHost, submitPrompt } = require('./providers.cjs'
 const MAX_BODY = 160000;
 const IDLE_MS = 20 * 60 * 1000;
 const PAIR_CODE_MS = 10 * 60 * 1000;
-const DEVICE_TOKEN_MS = 7 * 24 * 60 * 60 * 1000;
+const LEGACY_DEVICE_TOKEN_MS = 7 * 24 * 60 * 60 * 1000;
 const VIEWPORT = { width: 412, height: 780 };
 const HOSTS = [
   'chatgpt.com', 'openai.com', 'oaistatic.com', 'oaiusercontent.com',
@@ -60,16 +60,24 @@ function createBridge({ token, origin, executablePath, launch = chromium.launch.
 
   function sign(payload) { return crypto.createHmac('sha256', expectedToken).update(payload).digest('base64url'); }
   function issueDeviceToken() {
-    const payload = Buffer.from(JSON.stringify({ exp: Date.now() + DEVICE_TOKEN_MS, nonce: crypto.randomBytes(16).toString('base64url') })).toString('base64url');
-    return `rea1.${payload}.${sign(payload)}`;
+    // A paired device remains authorized until the owner rotates the service
+    // secret. This survives host restarts without retaining provider cookies.
+    const payload = Buffer.from(JSON.stringify({ v: 2, scope: 'device', nonce: crypto.randomBytes(16).toString('base64url') })).toString('base64url');
+    return `rea2.${payload}.${sign('rea2.' + payload)}`;
   }
   function validDeviceToken(given) {
+    if (given.length > 1024) return false;
     const parts = given.split('.');
-    if (parts.length !== 3 || parts[0] !== 'rea1' || !/^[A-Za-z0-9_-]+$/.test(parts[1]) || !/^[A-Za-z0-9_-]+$/.test(parts[2])) return false;
-    if (!tokenMatches(parts[2], sign(parts[1]))) return false;
+    if (parts.length !== 3 || !['rea1', 'rea2'].includes(parts[0]) || !/^[A-Za-z0-9_-]+$/.test(parts[1]) || !/^[A-Za-z0-9_-]{43}$/.test(parts[2])) return false;
+    // Bind v2's prefix into its signature so changing a legacy prefix cannot
+    // turn an expired seven-day credential into a persistent one.
+    const signed = parts[0] === 'rea2' ? 'rea2.' + parts[1] : parts[1];
+    if (!tokenMatches(parts[2], sign(signed))) return false;
     try {
       const data = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
-      return Number.isSafeInteger(data.exp) && data.exp > Date.now() && data.exp <= Date.now() + DEVICE_TOKEN_MS && typeof data.nonce === 'string';
+      if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+      if (parts[0] === 'rea2') return Object.keys(data).length === 3 && data.v === 2 && data.scope === 'device' && typeof data.nonce === 'string' && /^[A-Za-z0-9_-]{22}$/.test(data.nonce);
+      return Number.isSafeInteger(data.exp) && data.exp > Date.now() && data.exp <= Date.now() + LEGACY_DEVICE_TOKEN_MS && typeof data.nonce === 'string';
     } catch { return false; }
   }
 
@@ -91,8 +99,15 @@ function createBridge({ token, origin, executablePath, launch = chromium.launch.
   }
   async function getBrowser() {
     if (!browserPromise) {
-      browserPromise = launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
-      browserPromise.catch(() => { browserPromise = null; });
+      const pending = Promise.resolve().then(() => launch({ headless: true, ...(executablePath ? { executablePath } : {}) }));
+      browserPromise = pending;
+      pending.then(browser => {
+        browser.once?.('disconnected', () => {
+          if (browserPromise !== pending) return;
+          browserPromise = null;
+          closeSession(activeSession).catch(() => {});
+        });
+      }, () => { if (browserPromise === pending) browserPromise = null; });
     }
     return browserPromise;
   }
@@ -112,6 +127,7 @@ function createBridge({ token, origin, executablePath, launch = chromium.launch.
       try {
         await context.route('**/*', route => allowedDestination(route.request().url()) ? route.continue() : route.abort('blockedbyclient'));
         if (typeof context.routeWebSocket === 'function') await context.routeWebSocket('**/*', ws => allowedDestination(ws.url()) ? ws.connectToServer() : ws.close({ code: 1008, reason: 'Destination blocked' }));
+        if (closing || (typeof browser.isConnected === 'function' && !browser.isConnected())) throw error(503, 'ब्राउज़र सत्र बंद हो गया। फिर से जोड़ें।');
         const session = { id: crypto.randomUUID(), context, pages: {}, activeService: null, resumeUrls: {}, pageQueue: Promise.resolve(), acknowledged: {}, controllers: new Set(), busy: false, busyService: null, touched: Date.now(), closed: false };
         activeSession = session;
         return session;
@@ -220,7 +236,8 @@ function createBridge({ token, origin, executablePath, launch = chromium.launch.
       }
       if (url.pathname === '/v1/connect' && req.method === 'POST') {
         await body(req); const session = await openSession();
-        return send(res, 200, { session: session.id, viewport: VIEWPORT, acknowledged: session.acknowledged });
+        const deviceToken = !isAdmin && given.startsWith('rea1.') ? issueDeviceToken() : undefined;
+        return send(res, 200, { session: session.id, viewport: VIEWPORT, acknowledged: session.acknowledged, ...(deviceToken ? { deviceToken } : {}) });
       }
       const session = sessionFrom(req);
       if (url.pathname === '/v1/close' && req.method === 'POST') {

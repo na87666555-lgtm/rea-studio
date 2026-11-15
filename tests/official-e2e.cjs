@@ -68,7 +68,7 @@ async function main() {
     await page.waitForFunction(()=>!document.querySelector('#officialControls').hidden);
     assert.equal(new URL(page.url()).hash,'');
     const device = JSON.parse(await page.evaluate(()=>localStorage.getItem('rea.officialBridge.device')));
-    assert.ok(device.token.startsWith('rea1.')); assert.notEqual(device.token, token);
+    assert.ok(device.token.startsWith('rea2.')); assert.notEqual(device.token, token);
     assert.equal((await fetch(bridgeUrl + '/v1/pair',{method:'POST',headers:{origin,'content-type':'application/json'},body:JSON.stringify({code})})).status,401);
     await page.locator('#officialDialog [data-action="close-dialog"]').click();
     await page.locator('.welcome [data-action="new-team"]').click();
@@ -99,12 +99,27 @@ async function main() {
     await page.waitForFunction(()=>!document.querySelector('#sendBtn').classList.contains('stop'));
     await page.locator('#projectBtn').click(); assert.equal(await page.locator('#projectPath').inputValue(),'index.html');
     assert.ok((await page.locator('#projectContent').inputValue()).includes('BRIDGE_CODE_TOKEN'));
+    const oldSession = JSON.parse(await page.evaluate(()=>sessionStorage.getItem('rea.officialBridge.session'))).session;
+    // Simulate an idle host losing its provider browser without removing the
+    // phone's pairing. The next user visit must reconnect without a new link.
+    assert.equal((await fetch(bridgeUrl+'/v1/close',{method:'POST',headers:{origin,authorization:`Bearer ${token}`,'content-type':'application/json','x-rea-session':oldSession},body:'{}'})).status,200);
     const secondPage=await context.newPage();
-    await secondPage.goto(origin); await secondPage.locator('[data-action="open-drawer"]').click();
+    const startupCalls=[];
+    secondPage.on('request',r=>{if(r.url().startsWith(bridgeUrl)) startupCalls.push(r.url());});
+    await secondPage.goto(origin);
+    assert.equal(startupCalls.length,0,'opening the app alone must not wake the free browser host');
+    await secondPage.locator('[data-action="open-drawer"]').click();
     await secondPage.locator('[data-action="official-browser"]').first().click();
-    assert.equal(await secondPage.locator('#officialToken').inputValue(),device.token);
-    await secondPage.locator('[data-action="official-connect"]').click();
     await secondPage.waitForFunction(()=>!document.querySelector('#officialControls').hidden);
+    assert.equal(await secondPage.locator('#officialToken').inputValue(),device.token);
+    assert.notEqual(JSON.parse(await secondPage.evaluate(()=>sessionStorage.getItem('rea.officialBridge.session'))).session,oldSession);
+    assert.ok((await secondPage.locator('#officialSite').innerText()).includes('पुष्टि बाकी'));
+    assert.equal(await secondPage.locator('#officialScreen').getAttribute('src'),null);
+    await secondPage.locator('[data-action="official-close-session"]').click();
+    await secondPage.waitForFunction(()=>document.querySelector('#officialControls').hidden);
+    assert.equal(JSON.parse(await secondPage.evaluate(()=>localStorage.getItem('rea.officialBridge.device'))).token,device.token);
+    await secondPage.locator('[data-action="official-forget"]').click();
+    await secondPage.waitForFunction(()=>!localStorage.getItem('rea.officialBridge.device'));
     await secondPage.close();
     assert.deepEqual(errors,[]);
     console.log('PASS: one-use phone pairing -> authenticated bridge -> three fixture sites -> code handoff -> one result. Provider logins are not simulated as real.');

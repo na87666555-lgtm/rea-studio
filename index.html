@@ -88,7 +88,8 @@
     <p class="hint">प्रायोगिक: यह आपकी अलग ब्राउज़र सेवा पर चलता है। उस सेवा को आपके लॉगिन सत्र और स्क्रीन की पहुँच होगी। वेबसाइट की सुरक्षा-जाँच या CAPTCHA रोक सकती है; तीनों खातों में लॉगिन और जवाब मिलना अभी सुनिश्चित नहीं है।</p>
     <label>आपकी ब्राउज़र सेवा का HTTPS पता<input id="officialUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://…"></label>
     <label>ब्राउज़र सेवा का पासकोड<input id="officialToken" type="password" autocomplete="off" spellcheck="false"></label>
-    <div class="row wrap"><button type="button" class="btn primary" data-action="official-connect">सेवा जोड़ें</button><button type="button" class="btn danger" data-action="official-close-session">लॉगआउट और सत्र बंद</button></div>
+    <div class="row wrap"><button type="button" class="btn primary" data-action="official-connect">सेवा जोड़ें</button><button type="button" class="btn" data-action="official-close-session">वेबसाइट सत्र बंद करें</button><button type="button" class="btn danger" data-action="official-forget">फोन का कनेक्शन हटाएँ</button></div>
+    <p class="hint">एक बार लिंक से जोड़ने के बाद इसी ब्राउज़र में फोन का कनेक्शन सेव रहता है; उसमें दिन की सीमा नहीं है। ऐप का डेटा या कनेक्शन हटाने पर फिर जोड़ना होगा। मुफ़्त सर्वर सो सकता है और वेबसाइटों में फिर लॉगिन करना पड़ सकता है। मुफ़्त उपयोग की सीमाएँ सेवा देने वाली कंपनियाँ तय करती हैं।</p>
     <p id="officialStatus" class="hint" role="status">सेवा जोड़ने पर लॉगिन की स्क्रीन यहाँ खुलेगी।</p>
     <div id="officialControls" hidden>
       <div class="row wrap"><button type="button" class="btn small" data-action="official-site" data-site="chatgpt">ChatGPT</button><button type="button" class="btn small" data-action="official-site" data-site="gemini">Gemini</button><button type="button" class="btn small" data-action="official-site" data-site="claude">Claude</button></div>

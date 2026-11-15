@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { EventEmitter } = require('node:events');
 
 const token = 'this-is-a-test-token-with-40-characters-long';
 const origin = 'https://na87666555-lgtm.github.io';
@@ -64,7 +65,7 @@ test('pairing is private, short-lived, one-use, and cannot create new pairing co
     assert.equal((await post('/v1/pair', { code: 'wrong' }, { origin, 'content-type': 'application/json' })).status, 401);
     const pairHeaders = { origin, 'content-type': 'application/json' };
     const paired = await (await post('/v1/pair', { code: issued.code }, pairHeaders)).json();
-    assert.ok(paired.token.startsWith('rea1.')); assert.notEqual(paired.token, token);
+    assert.ok(paired.token.startsWith('rea2.')); assert.notEqual(paired.token, token);
     assert.equal((await post('/v1/pair', { code: issued.code }, pairHeaders)).status, 401);
     const deviceHeaders = { ...headers, authorization: `Bearer ${paired.token}` };
     assert.equal((await post('/v1/pair-code', {}, deviceHeaders)).status, 403);
@@ -76,6 +77,104 @@ test('pairing is private, short-lived, one-use, and cannot create new pairing co
     const next = await (await post('/v1/pair-code', {})).json();
     for (let i = 0; i < 10; i++) assert.equal((await post('/v1/pair', { code: 'wrong' }, pairHeaders)).status, 401);
     assert.equal((await post('/v1/pair', { code: next.code }, pairHeaders)).status, 401);
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
+test('persistent device tokens survive restart, keep their scope, and revoke on administrator secret rotation', async () => {
+  const launch = async () => ({ newContext: async () => ({ route: async () => {}, routeWebSocket: async () => {}, close: async () => {} }), close: async () => {} });
+  const start = async secret => {
+    const server = createBridge({ token: secret, origin, launch });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    return { server, post: (route, data, credential = secret) => fetch(base + route, { method: 'POST', headers: { origin, authorization: `Bearer ${credential}`, 'content-type': 'application/json' }, body: JSON.stringify(data) }) };
+  };
+  let instance = await start(token);
+  try {
+    const { code } = await (await instance.post('/v1/pair-code', {})).json();
+    const { token: device } = await (await instance.post('/v1/pair', { code }, '')).json();
+    const parts = device.split('.');
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
+    assert.deepEqual(Object.keys(payload).sort(), ['nonce', 'scope', 'v']);
+    assert.equal(payload.scope, 'device'); assert.equal(payload.v, 2);
+    const first = await (await instance.post('/v1/connect', {}, device)).json();
+    assert.ok(first.session); assert.equal(first.deviceToken, undefined);
+    const swappedPrefix = device.replace(/^rea2/, 'rea1');
+    assert.equal((await instance.post('/v1/connect', {}, swappedPrefix)).status, 401);
+    const modifiedPayload = Buffer.from(JSON.stringify({ ...payload, scope: 'admin' })).toString('base64url');
+    assert.equal((await instance.post('/v1/connect', {}, `rea2.${modifiedPayload}.${parts[2]}`)).status, 401);
+    // Even a correctly signed v2 token must have the exact device schema.
+    for (const data of [{ ...payload, scope: 'admin' }, { ...payload, v: 1 }, { ...payload, nonce: 'short' }, { ...payload, exp: Date.now() + 1e9 }]) {
+      const encoded = Buffer.from(JSON.stringify(data)).toString('base64url');
+      const signature = crypto.createHmac('sha256', token).update('rea2.' + encoded).digest('base64url');
+      assert.equal((await instance.post('/v1/connect', {}, `rea2.${encoded}.${signature}`)).status, 401);
+    }
+    assert.equal((await instance.post('/v1/pair-code', {}, device)).status, 403);
+    await new Promise(resolve => instance.server.close(resolve));
+    instance = await start(token);
+    const second = await (await instance.post('/v1/connect', {}, device)).json();
+    assert.ok(second.session); assert.notEqual(second.session, first.session);
+    assert.deepEqual(second.acknowledged, {});
+    await new Promise(resolve => instance.server.close(resolve));
+    instance = await start(token + '-rotated');
+    assert.equal((await instance.post('/v1/connect', {}, device)).status, 401);
+  } finally { await new Promise(resolve => instance.server.close(resolve)); }
+});
+
+test('legacy device tokens upgrade only after connection and retain their original expiry checks', async () => {
+  let failLaunch = true;
+  const launch = async () => {
+    if (failLaunch) throw new Error('launch unavailable');
+    return { newContext: async () => ({ route: async () => {}, routeWebSocket: async () => {}, close: async () => {} }), close: async () => {} };
+  };
+  const legacy = exp => {
+    const payload = Buffer.from(JSON.stringify({ exp, nonce: crypto.randomBytes(16).toString('base64url') })).toString('base64url');
+    return `rea1.${payload}.${crypto.createHmac('sha256', token).update(payload).digest('base64url')}`;
+  };
+  const server = createBridge({ token, origin, launch });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const connect = credential => fetch(base + '/v1/connect', { method: 'POST', headers: { origin, authorization: `Bearer ${credential}`, 'content-type': 'application/json' }, body: '{}' });
+  try {
+    const valid = legacy(Date.now() + 3600000);
+    const expired = legacy(Date.now() - 1000);
+    const failed = await connect(valid); assert.equal(failed.status, 500); assert.equal((await failed.json()).deviceToken, undefined);
+    failLaunch = false;
+    assert.equal((await connect(expired)).status, 401);
+    assert.equal((await connect(expired.replace(/^rea1/, 'rea2'))).status, 401);
+    assert.equal((await connect(valid.replace(/^rea1/, 'rea2'))).status, 401);
+    assert.equal((await connect(legacy(Date.now() + 8 * 86400000))).status, 401);
+    const upgraded = await connect(valid); assert.equal(upgraded.status, 200);
+    const result = await upgraded.json(); assert.ok(result.deviceToken.startsWith('rea2.'));
+    assert.equal((await connect(result.deviceToken)).status, 200);
+    const admin = await (await connect(token)).json(); assert.equal(admin.deviceToken, undefined);
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
+test('disconnected Chromium is relaunched and the old browser session cannot be reused', async () => {
+  let launches = 0, contextCloses = 0;
+  const browsers = [];
+  const launch = async () => {
+    launches++;
+    const browser = new EventEmitter();
+    let connected = true;
+    browser.isConnected = () => connected;
+    browser.disconnect = () => { connected = false; browser.emit('disconnected'); };
+    browser.close = async () => browser.disconnect();
+    browser.newContext = async () => ({ route: async () => {}, routeWebSocket: async () => {}, close: async () => { contextCloses++; } });
+    browsers.push(browser); return browser;
+  };
+  const server = createBridge({ token, origin, launch });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const headers = { origin, authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+  const connect = () => fetch(base + '/v1/connect', { method: 'POST', headers, body: '{}' }).then(r => r.json());
+  try {
+    const first = await connect(); browsers[0].disconnect();
+    assert.equal((await fetch(base + '/v1/status', { headers: { ...headers, 'x-rea-session': first.session } })).status, 401);
+    const [second, concurrent] = await Promise.all([connect(), connect()]);
+    assert.equal(launches, 2); assert.equal(contextCloses, 1);
+    assert.notEqual(first.session, second.session); assert.equal(second.session, concurrent.session);
+    assert.deepEqual(second.acknowledged, {});
   } finally { await new Promise(resolve => server.close(resolve)); }
 });
 

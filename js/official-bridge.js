@@ -3,6 +3,7 @@
 const STORAGE_KEY = 'rea.officialBridge.session';
 const DEVICE_KEY = 'rea.officialBridge.device';
 export const SITE_IDS = ['chatgpt', 'gemini', 'claude'];
+const isDeviceToken = token => typeof token === 'string' && /^rea[12]\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token) && token.length <= 1024;
 
 export function normalizeBridgeUrl(value) {
   let url;
@@ -39,7 +40,14 @@ export class OfficialBridge {
   async connect(signal) {
     const r = await this.request('/v1/connect', { method: 'POST', signal });
     if (typeof r.session !== 'string' || !r.session) throw new Error('ब्राउज़र सत्र नहीं मिला।');
+    if (r.deviceToken !== undefined) {
+      if (!isDeviceToken(r.deviceToken)) throw new Error('सेवा से सही कनेक्शन नहीं मिला।');
+      this.token = r.deviceToken;
+    }
     this.session = r.session; this.acknowledged = r.acknowledged || {};
+    if (isDeviceToken(this.token)) {
+      try { localStorage.setItem(DEVICE_KEY, JSON.stringify({ base: this.base, token: this.token })); } catch { /* current tab still works */ }
+    }
     try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ base: this.base, token: this.token, session: this.session })); } catch { /* session still works until tab closes */ }
     return r;
   }
@@ -48,9 +56,13 @@ export class OfficialBridge {
   async action(service, action, values = {}, signal) { return this.request('/v1/action', { method: 'POST', data: { service, action, ...values }, signal }); }
   async acknowledge(service, signal) { const r = await this.request('/v1/acknowledge', { method: 'POST', data: { service }, signal }); this.acknowledged[service] = true; return r; }
   async prompt(service, prompt, signal) { return this.request('/v1/prompt', { method: 'POST', data: { service, prompt }, signal }); }
-  async close() {
-    try { if (this.session) await this.request('/v1/close', { method: 'POST' }); }
-    finally { this.session = ''; this.acknowledged = {}; clearOfficialBridgeStorage(); }
+  async close({ forget = true } = {}) {
+    try { if (this.session) await this.request('/v1/close', { method: 'POST', signal: AbortSignal.timeout(15000) }); }
+    finally {
+      this.session = ''; this.acknowledged = {};
+      if (forget) clearOfficialBridgeStorage();
+      else try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ base: this.base, token: this.token, session: '' })); } catch { /* paired device remains in local storage */ }
+    }
   }
 }
 
@@ -73,7 +85,7 @@ export async function pairOfficialBridge(base, code, signal) {
   }
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error || `ब्राउज़र सेवा ने त्रुटि दी (${response.status})।`);
-  if (typeof result.token !== 'string' || !result.token.startsWith('rea1.') || result.token.length > 1024) throw new Error('सेवा से सही कनेक्शन नहीं मिला।');
+  if (!isDeviceToken(result.token)) throw new Error('सेवा से सही कनेक्शन नहीं मिला।');
   const bridge = new OfficialBridge(base, result.token);
   try { localStorage.setItem(DEVICE_KEY, JSON.stringify({ base: bridge.base, token: bridge.token })); } catch { /* usable until tab closes */ }
   await bridge.connect(signal);
@@ -81,10 +93,16 @@ export async function pairOfficialBridge(base, code, signal) {
 }
 
 export function restoreOfficialBridge() {
-  try {
-    const stored = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || localStorage.getItem(DEVICE_KEY) || 'null');
-    return stored ? new OfficialBridge(stored.base, stored.token, stored.session) : null;
-  } catch { return null; }
+  let session, device;
+  try { session = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || 'null'); } catch { /* try device storage */ }
+  try { device = JSON.parse(localStorage.getItem(DEVICE_KEY) || 'null'); } catch { /* try current session */ }
+  // Another tab may already have upgraded a legacy device token.
+  if (session && device && session.base === device.base && session.token !== device.token) session = null;
+  for (const stored of [session, device]) {
+    if (!stored) continue;
+    try { return new OfficialBridge(stored.base, stored.token, stored.session); } catch { /* try next storage */ }
+  }
+  return null;
 }
 
 // A provider may return code changes in one strict JSON envelope. Never guess

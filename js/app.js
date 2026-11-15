@@ -9,7 +9,7 @@ import { PROJECT_TOOLS, filesOf, writeProject, projectTool, projectContext, prev
 import { OfficialBridge, SITE_IDS, restoreOfficialBridge, clearOfficialBridgeStorage, pairOfficialBridge, parseWebsiteEdits, buildWebsitePrompt } from './official-bridge.js';
 
 // Bump together with version.json on every release.
-const APP_VERSION = '2026.11.14-8';
+const APP_VERSION = '2026.11.15-1';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const NEW_TITLE = 'नई चैट';
@@ -690,7 +690,7 @@ function refreshOfficialSiteLabel(host = '') {
   const done = !!officialBridge?.acknowledged[officialSite];
   $('#officialSite').textContent = `${SITE_NAMES[officialSite]}${host ? ` · ${host}` : ''} · ${done ? 'आपकी लॉगिन पुष्टि दर्ज है' : 'लॉगिन की पुष्टि बाकी है'}`;
 }
-function openOfficialDialog() {
+function openOfficialDialog({ reconnect = true } = {}) {
   closeDrawer();
   $('#officialUrl').value = officialBridge?.base || '';
   $('#officialToken').value = officialBridge?.token || '';
@@ -699,15 +699,11 @@ function openOfficialDialog() {
   officialStatus(officialBridge?.session ? 'अपनी वेबसाइट चुनें और उसकी स्क्रीन खोलें।' : 'अपनी भरोसेमंद ब्राउज़र सेवा जोड़ें।');
   refreshOfficialSiteLabel();
   if (!$('#officialDialog').open) $('#officialDialog').showModal();
-  if (officialBridge?.session) {
-    officialBridge.status(AbortSignal.timeout(15000)).then(() => refreshOfficialSiteLabel()).catch(() => {
-      officialStatus('सत्र समाप्त हो गया हो सकता है। सेवा जोड़ें दबाएँ।');
-    });
-  }
+  if (reconnect && officialBridge) connectOfficial();
 }
 async function connectPairLink() {
   if (!pairLink) return;
-  openOfficialDialog();
+  openOfficialDialog({ reconnect: false });
   setOfficialBusy(true);
   officialStatus('इस फोन को ब्राउज़र सेवा से जोड़ रहे हैं…');
   try {
@@ -727,15 +723,22 @@ async function connectPairLink() {
 async function connectOfficial() {
   if (officialActionBusy) return;
   setOfficialBusy(true);
+  $('#officialControls').hidden = true;
+  $('#officialScreen').removeAttribute('src');
   try {
     const candidate = new OfficialBridge($('#officialUrl').value, $('#officialToken').value);
-    officialStatus('ब्राउज़र सेवा से जुड़ रहे हैं…');
-    await candidate.connect(AbortSignal.timeout(60000));
+    officialStatus('सेवा से जुड़ रहे हैं… मुफ़्त सर्वर सोया हो तो जागने में लगभग एक मिनट लग सकता है।');
+    await candidate.connect(AbortSignal.timeout(90000));
     officialBridge = candidate;
+    $('#officialToken').value = candidate.token;
     $('#officialControls').hidden = false;
     officialStatus('सेवा जुड़ गई। एक वेबसाइट चुनें और लॉगिन करें।');
     refreshOfficialSiteLabel();
-  } catch (e) { officialStatus(e.message); }
+  } catch (e) {
+    if (officialBridge) { officialBridge.session = ''; officialBridge.acknowledged = {}; }
+    refreshOfficialSiteLabel();
+    officialStatus(e.message);
+  }
   finally { setOfficialBusy(false); }
 }
 async function viewOfficial() {
@@ -775,13 +778,18 @@ async function confirmOfficialLogin() {
   } catch (e) { officialStatus(e.message); }
   finally { setOfficialBusy(false); }
 }
-async function closeOfficialSession() {
+async function closeOfficialSession(forget = false) {
   if (!officialBridge || officialActionBusy) return;
   if (officialTeamBusy) { officialStatus('पहले टीम का काम रोकें।'); return; }
   setOfficialBusy(true);
-  try { await officialBridge.close(); officialStatus('ब्राउज़र सत्र बंद कर दिया गया।'); }
+  try { await officialBridge.close({ forget }); officialStatus(forget ? 'इस फोन का कनेक्शन हटा दिया गया।' : 'वेबसाइट सत्र बंद है। फोन का कनेक्शन सेव है; अगली बार नए लिंक की ज़रूरत नहीं।'); }
   catch { officialStatus('सर्वर से संपर्क नहीं हुआ; सत्र निष्क्रिय होने पर बंद होगा।'); }
-  finally { officialBridge = null; setOfficialBusy(false); $('#officialControls').hidden = true; $('#officialScreen').removeAttribute('src'); $('#officialToken').value = ''; }
+  finally {
+    if (forget) officialBridge = null;
+    setOfficialBusy(false); $('#officialControls').hidden = true; $('#officialScreen').removeAttribute('src');
+    $('#officialToken').value = officialBridge?.token || '';
+    refreshOfficialSiteLabel();
+  }
 }
 
 function syncTeamMode() {
@@ -1525,6 +1533,7 @@ function onClick(e) {
     case 'official-browser': openOfficialDialog(); break;
     case 'official-connect': connectOfficial(); break;
     case 'official-close-session': closeOfficialSession(); break;
+    case 'official-forget': closeOfficialSession(true); break;
     case 'official-site':
       if (officialTeamBusy) { officialStatus('टीम का काम पूरा होने दें या चैट से उसे रोकें।'); break; }
       if (!officialActionBusy && SITE_IDS.includes(b.dataset.site)) { officialSite = b.dataset.site; $('#officialScreen').removeAttribute('src'); refreshOfficialSiteLabel(); viewOfficial(); }
@@ -1778,7 +1787,6 @@ function init() {
   }
   startAutoUpdate();
   if (pairLink) connectPairLink();
-  else if (officialBridge?.session) officialBridge.status(AbortSignal.timeout(15000)).catch(() => {});
 }
 
 init();
