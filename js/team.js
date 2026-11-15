@@ -44,7 +44,7 @@ async function withDeadline(parent, work, timeoutMs) {
 }
 
 export async function runTeam({ members, coordinator = 2, system = '', getHistory, tools = [], executeTool,
-  signal, onMember, onPhase, onText, getWorkspace = () => '', afterMember = async () => {}, turn = streamTurn, timeoutMs = 240000 }) {
+  signal, onMember, onPhase, onText, getWorkspace = () => '', afterMember = async () => {}, turn = streamTurn, timeoutMs = 240000, requireAll = false }) {
   const results = members.map(m => ({ label: m.label, model: m.model, provider: m.conn.name || m.conn.baseUrl || '', status: 'queued', text: '', steps: [] }));
   const update = i => onMember(i, { ...results[i], steps: results[i].steps.map(s => ({ ...s })) });
   onPhase('drafts');
@@ -121,6 +121,10 @@ export async function runTeam({ members, coordinator = 2, system = '', getHistor
       catch (e) { r.notice = `फ़ाइलें सेव नहीं हो पाईं: ${e.message || 'त्रुटि'}`; }
     }
     update(i);
+    if (requireAll && r.status === 'error' && !signal.aborted) {
+      results.forEach((other, j) => { if (other.status === 'queued') { other.status = 'stopped'; update(j); } });
+      throw new Error(`${r.label} से जवाब नहीं मिला। तीनों वेबसाइटों के बिना साझा जवाब तैयार नहीं होगा। वेबसाइट की लॉगिन या सुरक्षा-जाँच देखें।`);
+    }
     if (signal.aborted) {
       results.forEach((other, j) => { if (other.status === 'queued') { other.status = 'stopped'; update(j); } });
     }

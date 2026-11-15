@@ -58,6 +58,21 @@ test('no fabricated synthesis when every provider fails', async () => {
   assert.equal(s.events.output, ''); assert.ok(!s.events.phases.includes('synthesis'));
 });
 
+test('website mode stops without a combined answer if any required site fails', async () => {
+  const calls = [];
+  const s = setup({ requireAll: true, turn: async args => {
+    calls.push(args.model);
+    if (args.model === 'gemini-test') throw new Error('website blocked');
+    args.onText('available'); return response();
+  } });
+  await assert.rejects(runTeam(s.opts), /Gemini से जवाब नहीं मिला/);
+  assert.deepEqual(calls, ['gpt-test', 'gemini-test']);
+  assert.equal(s.events.members[1].status, 'error');
+  assert.equal(s.events.members[2].status, 'stopped');
+  assert.equal(s.events.output, '');
+  assert.ok(!s.events.phases.includes('synthesis'));
+});
+
 test('stop aborts running and queued members and prevents synthesis', async () => {
   const s = setup({ turn: args => new Promise((resolve, reject) => {
     args.signal.addEventListener('abort', () => reject(args.signal.reason), { once: true });

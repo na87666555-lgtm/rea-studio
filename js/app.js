@@ -511,7 +511,7 @@ async function runTeamGeneration(chat) {
       getHistory: c => websiteMode ? buildWebsiteHistory(sharedMessages) : buildHistory(sharedMessages, c, sharedSettings),
       tools: websiteMode ? [] : [...enabledTools(sharedSettings), ...PROJECT_TOOLS], signal: controller.signal,
       getWorkspace: () => projectContext(chat),
-      ...(websiteMode ? { turn: officialWebsiteTurn, afterMember: (i, result) => saveWebsiteEdits(chat, i, result) } : {}),
+      ...(websiteMode ? { turn: officialWebsiteTurn, requireAll: true, afterMember: (i, result) => saveWebsiteEdits(chat, i, result) } : {}),
       executeTool: async (name, args, signal) => {
         if (PROJECT_TOOLS.some(t => t.name === name)) {
           const previous = structuredClone(chat.workspace || { files: {} });
