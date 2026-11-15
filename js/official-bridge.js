@@ -1,6 +1,7 @@
 // The optional bridge opens the actual provider websites in a user-controlled
 // browser session. It never accepts or proxies model API credentials.
 const STORAGE_KEY = 'rea.officialBridge.session';
+const DEVICE_KEY = 'rea.officialBridge.device';
 export const SITE_IDS = ['chatgpt', 'gemini', 'claude'];
 
 export function normalizeBridgeUrl(value) {
@@ -49,13 +50,39 @@ export class OfficialBridge {
   async prompt(service, prompt, signal) { return this.request('/v1/prompt', { method: 'POST', data: { service, prompt }, signal }); }
   async close() {
     try { if (this.session) await this.request('/v1/close', { method: 'POST' }); }
-    finally { this.session = ''; this.acknowledged = {}; try { sessionStorage.removeItem(STORAGE_KEY); } catch { /* ignored */ } }
+    finally { this.session = ''; this.acknowledged = {}; clearOfficialBridgeStorage(); }
   }
+}
+
+export function clearOfficialBridgeStorage() {
+  try { sessionStorage.removeItem(STORAGE_KEY); } catch { /* ignored */ }
+  try { localStorage.removeItem(DEVICE_KEY); } catch { /* ignored */ }
+}
+
+// A one-use, short-lived code pairs this phone without putting the private
+// service-admin secret in a link, chat, or persistent phone storage.
+export async function pairOfficialBridge(base, code, signal) {
+  base = normalizeBridgeUrl(base);
+  if (typeof code !== 'string' || !/^[A-Za-z0-9_-]{20,128}$/.test(code)) throw new Error('जोड़ने वाला लिंक सही नहीं है।');
+  let response;
+  try {
+    response = await fetch(base + '/v1/pair', { method: 'POST', signal, redirect: 'error', credentials: 'omit', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
+  } catch (e) {
+    if (signal?.aborted) throw signal.reason || e;
+    throw new Error('ब्राउज़र सेवा से संपर्क नहीं हुआ।');
+  }
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || `ब्राउज़र सेवा ने त्रुटि दी (${response.status})।`);
+  if (typeof result.token !== 'string' || !result.token.startsWith('rea1.') || result.token.length > 1024) throw new Error('सेवा से सही कनेक्शन नहीं मिला।');
+  const bridge = new OfficialBridge(base, result.token);
+  try { localStorage.setItem(DEVICE_KEY, JSON.stringify({ base: bridge.base, token: bridge.token })); } catch { /* usable until tab closes */ }
+  await bridge.connect(signal);
+  return bridge;
 }
 
 export function restoreOfficialBridge() {
   try {
-    const stored = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || 'null');
+    const stored = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || localStorage.getItem(DEVICE_KEY) || 'null');
     return stored ? new OfficialBridge(stored.base, stored.token, stored.session) : null;
   } catch { return null; }
 }

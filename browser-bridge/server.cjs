@@ -10,6 +10,8 @@ const { SERVICES, assertOfficialHost, submitPrompt } = require('./providers.cjs'
 
 const MAX_BODY = 160000;
 const IDLE_MS = 20 * 60 * 1000;
+const PAIR_CODE_MS = 10 * 60 * 1000;
+const DEVICE_TOKEN_MS = 7 * 24 * 60 * 60 * 1000;
 const VIEWPORT = { width: 412, height: 780 };
 const HOSTS = [
   'chatgpt.com', 'openai.com', 'oaistatic.com', 'oaiusercontent.com',
@@ -53,7 +55,23 @@ function createBridge({ token, origin, executablePath, launch = chromium.launch.
   let activeSession = null;
   let openingSession = null;
   let closing = false;
+  let pairing = null;
   const expectedToken = token;
+
+  function sign(payload) { return crypto.createHmac('sha256', expectedToken).update(payload).digest('base64url'); }
+  function issueDeviceToken() {
+    const payload = Buffer.from(JSON.stringify({ exp: Date.now() + DEVICE_TOKEN_MS, nonce: crypto.randomBytes(16).toString('base64url') })).toString('base64url');
+    return `rea1.${payload}.${sign(payload)}`;
+  }
+  function validDeviceToken(given) {
+    const parts = given.split('.');
+    if (parts.length !== 3 || parts[0] !== 'rea1' || !/^[A-Za-z0-9_-]+$/.test(parts[1]) || !/^[A-Za-z0-9_-]+$/.test(parts[2])) return false;
+    if (!tokenMatches(parts[2], sign(parts[1]))) return false;
+    try {
+      const data = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+      return Number.isSafeInteger(data.exp) && data.exp > Date.now() && data.exp <= Date.now() + DEVICE_TOKEN_MS && typeof data.nonce === 'string';
+    } catch { return false; }
+  }
 
   function send(res, status, body) {
     if (res.writableEnded || res.destroyed) return;
@@ -179,9 +197,27 @@ function createBridge({ token, origin, executablePath, launch = chromium.launch.
         res.writeHead(204, { 'access-control-allow-origin': origin, 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-headers': 'Authorization, Content-Type, X-Rea-Session', 'access-control-max-age': '600', vary: 'Origin' });
         return res.end();
       }
-      const authorization = req.headers.authorization || '';
-      if (!authorization.startsWith('Bearer ') || !tokenMatches(authorization.slice(7), expectedToken)) throw error(401, 'ब्राउज़र सेवा का पासकोड गलत है।');
       if (req.method === 'POST' && !(req.headers['content-type'] || '').toLowerCase().startsWith('application/json')) throw error(415, 'JSON अनुरोध आवश्यक है।');
+      if (url.pathname === '/v1/pair' && req.method === 'POST') {
+        const data = await body(req);
+        if (!pairing || pairing.expires <= Date.now() || pairing.failures >= 10 || typeof data.code !== 'string' || data.code.length > 128 || !crypto.timingSafeEqual(hash(data.code), pairing.codeHash)) {
+          if (pairing) pairing.failures++;
+          throw error(401, 'जोड़ने वाला लिंक गलत या समाप्त हो गया है।');
+        }
+        pairing = null; // A code grants access once, even for simultaneous requests.
+        return send(res, 200, { token: issueDeviceToken() });
+      }
+      const authorization = req.headers.authorization || '';
+      const given = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+      const isAdmin = tokenMatches(given, expectedToken);
+      if (!isAdmin && !validDeviceToken(given)) throw error(401, 'ब्राउज़र सेवा का पासकोड गलत है।');
+      if (url.pathname === '/v1/pair-code' && req.method === 'POST') {
+        if (!isAdmin) throw error(403, 'नया जोड़ने वाला लिंक केवल सेवा का मालिक बना सकता है।');
+        await body(req);
+        const code = crypto.randomBytes(16).toString('base64url');
+        pairing = { codeHash: hash(code), expires: Date.now() + PAIR_CODE_MS, failures: 0 };
+        return send(res, 200, { code, expiresIn: PAIR_CODE_MS / 1000 });
+      }
       if (url.pathname === '/v1/connect' && req.method === 'POST') {
         await body(req); const session = await openSession();
         return send(res, 200, { session: session.id, viewport: VIEWPORT, acknowledged: session.acknowledged });

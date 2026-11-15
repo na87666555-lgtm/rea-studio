@@ -4,6 +4,7 @@ const { createBridge, configuration, allowedDestination, tokenMatches } = requir
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 
 const token = 'this-is-a-test-token-with-40-characters-long';
 const origin = 'https://na87666555-lgtm.github.io';
@@ -45,6 +46,36 @@ test('bridge requires the configured origin and secret; session opening is seria
     assert.equal((await fetch(base + '/v1/prompt', { method: 'POST', headers: authenticated, body: JSON.stringify({ service: 'chatgpt', prompt: 'hello' }) })).status, 409);
     assert.equal((await fetch(base + '/v1/close', { method: 'POST', headers: authenticated, body: '{}' })).status, 200);
     assert.equal(closed, 1);
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
+test('pairing is private, short-lived, one-use, and cannot create new pairing codes', async () => {
+  const launch = async () => ({ newContext: async () => ({ route: async () => {}, routeWebSocket: async () => {}, close: async () => {} }), close: async () => {} });
+  const server = createBridge({ token, origin, launch });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const headers = { origin, authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+  const post = (route, data, h = headers) => fetch(base + route, { method: 'POST', headers: h, body: JSON.stringify(data) });
+  try {
+    assert.equal((await post('/v1/pair-code', {}, { ...headers, authorization: 'Bearer wrong' })).status, 401);
+    const issued = await (await post('/v1/pair-code', {})).json();
+    assert.equal(issued.expiresIn, 600);
+    assert.equal((await post('/v1/pair', { code: issued.code }, { ...headers, origin: 'https://evil.test' })).status, 403);
+    assert.equal((await post('/v1/pair', { code: 'wrong' }, { origin, 'content-type': 'application/json' })).status, 401);
+    const pairHeaders = { origin, 'content-type': 'application/json' };
+    const paired = await (await post('/v1/pair', { code: issued.code }, pairHeaders)).json();
+    assert.ok(paired.token.startsWith('rea1.')); assert.notEqual(paired.token, token);
+    assert.equal((await post('/v1/pair', { code: issued.code }, pairHeaders)).status, 401);
+    const deviceHeaders = { ...headers, authorization: `Bearer ${paired.token}` };
+    assert.equal((await post('/v1/pair-code', {}, deviceHeaders)).status, 403);
+    assert.equal((await post('/v1/connect', {}, deviceHeaders)).status, 200);
+    assert.equal((await post('/v1/connect', {}, { ...headers, authorization: `Bearer ${paired.token}x` })).status, 401);
+    const payload = Buffer.from(JSON.stringify({ exp: Date.now() - 1000, nonce: 'expired' })).toString('base64url');
+    const signature = crypto.createHmac('sha256', token).update(payload).digest('base64url');
+    assert.equal((await post('/v1/connect', {}, { ...headers, authorization: `Bearer rea1.${payload}.${signature}` })).status, 401);
+    const next = await (await post('/v1/pair-code', {})).json();
+    for (let i = 0; i < 10; i++) assert.equal((await post('/v1/pair', { code: 'wrong' }, pairHeaders)).status, 401);
+    assert.equal((await post('/v1/pair', { code: next.code }, pairHeaders)).status, 401);
   } finally { await new Promise(resolve => server.close(resolve)); }
 });
 

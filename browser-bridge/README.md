@@ -11,7 +11,7 @@ This optional, single-user service runs an isolated Chromium session for the Rea
 - This implementation has one user/session per service token and closes it after 20 minutes of inactivity. Restart, deploy, or hosting sleep ends that session. The app does not export cookies to disk, but Chromium and the host may use temporary runtime files. You may need to sign in again.
 - To keep memory lower, only one provider page is kept open at a time. Switching sites closes the other page, keeps the browser context and cookies, and tries to restore its last conversation. Some sites keep session data per tab or use popups, so this may require signing in again.
 - Requests and WebSockets in the browser are restricted to an allowlist of provider, login, and verification domains. This helps reduce unintended access, but can prevent some legitimate provider assets or login methods from loading. The bridge offers no arbitrary URL, shell, or code-execution endpoint.
-- API keys and the bridge token must never be committed. The browser bridge token is entered directly in the phone UI, stored only for that browser tab's session, and sent to the configured bridge. Never paste login passwords or tokens into chat messages.
+- API keys and the service administrator token must never be committed. A manually entered token stays in the current tab's session storage. Alternatively the service owner can create a single-use pairing link; the phone stores a separate, seven-day device token locally. Deleting the connection removes it from the phone, but rotating the service administrator token is needed to revoke already issued device tokens. Never paste login passwords or service tokens into chat messages.
 
 ## Running locally
 
@@ -26,6 +26,8 @@ npm start
 ```
 
 Expose the service only over HTTPS behind a trusted reverse proxy. CORS is locked to `REA_APP_ORIGIN`, and requests require `Authorization: Bearer <REA_BRIDGE_TOKEN>`. `GET /healthz` is unauthenticated and returns no session data. The process must bind to `0.0.0.0` and use the platform-provided `PORT`.
+
+An owner can request `POST /v1/pair-code` with the administrator bearer token, the configured `Origin`, and an empty JSON body. The response contains a single-use code that expires in ten minutes. Put it in the URL fragment of the trusted app URL as `#rea_pair=<code>&bridge=<URL-encoded-bridge-URL>`; the app clears the fragment immediately and exchanges the code for a limited-lifetime device token. A device token cannot issue new pairing codes. One code is active at a time, and ten incorrect attempts invalidate it. Only share a pairing link privately with the intended phone; anyone who gets it first can use the service until its device token expires or the administrator token is rotated.
 
 ## Docker deployment
 

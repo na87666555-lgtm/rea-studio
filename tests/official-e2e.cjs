@@ -60,15 +60,21 @@ async function main() {
   const bridgeUrl=`http://127.0.0.1:${bridge.address().port}`;
   const browser=await chromium.launch({headless:true,executablePath,args:['--no-sandbox']});
   try {
+    const codeResponse = await fetch(bridgeUrl + '/v1/pair-code', { method:'POST', headers:{ origin, authorization:`Bearer ${token}`, 'content-type':'application/json' }, body:'{}' });
+    assert.equal(codeResponse.status, 200); const { code } = await codeResponse.json();
     const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
     const page=await context.newPage(); const errors=[]; page.on('pageerror',e=>errors.push(e.message));
-    await page.goto(origin);
+    await page.goto(`${origin}/#rea_pair=${code}&bridge=${encodeURIComponent(bridgeUrl)}`);
+    await page.waitForFunction(()=>!document.querySelector('#officialControls').hidden);
+    assert.equal(new URL(page.url()).hash,'');
+    const device = JSON.parse(await page.evaluate(()=>localStorage.getItem('rea.officialBridge.device')));
+    assert.ok(device.token.startsWith('rea1.')); assert.notEqual(device.token, token);
+    assert.equal((await fetch(bridgeUrl + '/v1/pair',{method:'POST',headers:{origin,'content-type':'application/json'},body:JSON.stringify({code})})).status,401);
+    await page.locator('#officialDialog [data-action="close-dialog"]').click();
     await page.locator('.welcome [data-action="new-team"]').click();
     await page.locator('#tdMode').selectOption('website');
     await page.locator('#tdTitle').fill('असली वेबसाइट टीम');
     await page.locator('#teamWebsiteHint [data-action="official-browser"]').click();
-    await page.locator('#officialUrl').fill(bridgeUrl); await page.locator('#officialToken').fill(token);
-    await page.locator('[data-action="official-connect"]').click();
     await page.waitForFunction(()=>!document.querySelector('#officialControls').hidden);
     for(const [id,host] of [['chatgpt','chatgpt.com'],['gemini','gemini.google.com'],['claude','claude.ai']]) {
       await page.locator(`[data-action="official-site"][data-site="${id}"]`).click();
@@ -93,8 +99,15 @@ async function main() {
     await page.waitForFunction(()=>!document.querySelector('#sendBtn').classList.contains('stop'));
     await page.locator('#projectBtn').click(); assert.equal(await page.locator('#projectPath').inputValue(),'index.html');
     assert.ok((await page.locator('#projectContent').inputValue()).includes('BRIDGE_CODE_TOKEN'));
+    const secondPage=await context.newPage();
+    await secondPage.goto(origin); await secondPage.locator('[data-action="open-drawer"]').click();
+    await secondPage.locator('[data-action="official-browser"]').first().click();
+    assert.equal(await secondPage.locator('#officialToken').inputValue(),device.token);
+    await secondPage.locator('[data-action="official-connect"]').click();
+    await secondPage.waitForFunction(()=>!document.querySelector('#officialControls').hidden);
+    await secondPage.close();
     assert.deepEqual(errors,[]);
-    console.log('PASS: phone UI -> authenticated bridge -> browser controls -> three fixture sites -> code handoff -> one result. Provider logins are not simulated as real.');
+    console.log('PASS: one-use phone pairing -> authenticated bridge -> three fixture sites -> code handoff -> one result. Provider logins are not simulated as real.');
     await context.close();
   } finally {
     await browser.close(); await new Promise(r=>bridge.close(r)); await new Promise(r=>frontend.close(r));

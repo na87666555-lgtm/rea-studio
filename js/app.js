@@ -6,7 +6,7 @@ import { renderMarkdown, escapeHtml } from './markdown.js';
 import { acquire, release } from './queue.js';
 import { TEAM_ROLES, suggestTeam, resolveTeam, runTeam } from './team.js';
 import { PROJECT_TOOLS, filesOf, writeProject, projectTool, projectContext, previewDocument } from './project.js';
-import { OfficialBridge, SITE_IDS, restoreOfficialBridge, parseWebsiteEdits, buildWebsitePrompt } from './official-bridge.js';
+import { OfficialBridge, SITE_IDS, restoreOfficialBridge, clearOfficialBridgeStorage, pairOfficialBridge, parseWebsiteEdits, buildWebsitePrompt } from './official-bridge.js';
 
 // Bump together with version.json on every release.
 const APP_VERSION = '2026.11.14-8';
@@ -27,6 +27,9 @@ let editingConnId = null;
 let teamDraft = null;
 let editingTeamId = null;
 let officialBridge = restoreOfficialBridge();
+const pairParams = new URLSearchParams(location.hash.slice(1));
+const pairLink = pairParams.has('rea_pair') && pairParams.has('bridge') ? { code: pairParams.get('rea_pair'), base: pairParams.get('bridge') } : null;
+if (pairLink) history.replaceState(null, '', location.pathname + location.search);
 let officialSite = 'chatgpt';
 let officialActionBusy = false;
 let officialTeamBusy = false;
@@ -695,10 +698,31 @@ function openOfficialDialog() {
   $('#officialControls').hidden = !officialBridge?.session;
   officialStatus(officialBridge?.session ? 'अपनी वेबसाइट चुनें और उसकी स्क्रीन खोलें।' : 'अपनी भरोसेमंद ब्राउज़र सेवा जोड़ें।');
   refreshOfficialSiteLabel();
-  $('#officialDialog').showModal();
+  if (!$('#officialDialog').open) $('#officialDialog').showModal();
   if (officialBridge?.session) {
-    officialBridge.status(AbortSignal.timeout(15000)).then(() => refreshOfficialSiteLabel()).catch(() => officialStatus('सत्र समाप्त हो गया हो सकता है। सेवा फिर जोड़ें।'));
+    officialBridge.status(AbortSignal.timeout(15000)).then(() => refreshOfficialSiteLabel()).catch(() => {
+      officialStatus('सत्र समाप्त हो गया हो सकता है। सेवा जोड़ें दबाएँ।');
+    });
   }
+}
+async function connectPairLink() {
+  if (!pairLink) return;
+  openOfficialDialog();
+  setOfficialBusy(true);
+  officialStatus('इस फोन को ब्राउज़र सेवा से जोड़ रहे हैं…');
+  try {
+    officialBridge = await pairOfficialBridge(pairLink.base, pairLink.code, AbortSignal.timeout(90000));
+    $('#officialUrl').value = officialBridge.base;
+    $('#officialToken').value = officialBridge.token;
+    $('#officialControls').hidden = false;
+    officialStatus('सेवा जुड़ गई। एक वेबसाइट चुनें और लॉगिन करें।');
+    refreshOfficialSiteLabel();
+  } catch (e) {
+    officialBridge = restoreOfficialBridge();
+    $('#officialUrl').value = officialBridge?.base || '';
+    $('#officialToken').value = officialBridge?.token || '';
+    officialStatus(e.message);
+  } finally { setOfficialBusy(false); }
 }
 async function connectOfficial() {
   if (officialActionBusy) return;
@@ -1595,6 +1619,9 @@ function onClick(e) {
     case 'clear-all':
       if (confirm('सारी चैट और सारी API keys इस फ़ोन से हटाएँ?')) {
         abortAll();
+        if (officialBridge) officialBridge.close().catch(() => {});
+        clearOfficialBridgeStorage();
+        officialBridge = null;
         clearAll();
         clearFiles().catch(() => {});
         settings = loadSettings();
@@ -1750,7 +1777,8 @@ function init() {
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {});
   }
   startAutoUpdate();
-  if (officialBridge?.session) officialBridge.status(AbortSignal.timeout(15000)).catch(() => {});
+  if (pairLink) connectPairLink();
+  else if (officialBridge?.session) officialBridge.status(AbortSignal.timeout(15000)).catch(() => {});
 }
 
 init();
