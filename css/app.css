@@ -67,6 +67,7 @@ a { color: var(--accent); }
 .drawer-head { display: flex; align-items: center; justify-content: space-between; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; }
 .drawer-buttons { display: flex; flex-direction: column; gap: 8px; }
+.drawer-buttons .call-link { text-align: center; text-decoration: none; }
 .drawer-label { margin-top: 8px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .chat-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
 .chat-item { display: flex; align-items: center; border-radius: 10px; }

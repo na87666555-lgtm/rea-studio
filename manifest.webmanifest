@@ -1,7 +1,7 @@
 {
   "name": "Rea Studio",
   "short_name": "Rea",
-  "description": "अपनी API key से किसी भी AI provider के मॉडल चलाने वाला स्वतंत्र चैट ऐप, जिसमें कई काम एक साथ चलते हैं।",
+  "description": "सार्वजनिक स्रोत पढ़ें, 3D ऐनिमेशन बनाएँ और अपने जुड़े हुए AI मॉडलों के साथ चैट करें।",
   "lang": "hi",
   "start_url": "./",
   "scope": "./",

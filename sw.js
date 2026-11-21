@@ -6,11 +6,19 @@
 // does NOT change with app releases; change it only when this file's logic
 // changes. A new service worker waits until the app is closed before taking
 // over (no skipWaiting/claim), so it never swaps in during a page load.
-const CACHE = 'rea-studio-sw7';
+const CACHE = 'rea-studio-sw8';
 const ASSETS = [
   './',
   './index.html',
   './css/app.css',
+  './css/animation.css',
+  './css/call.css',
+  './call.html',
+  './js/call.js',
+  './js/animation.js',
+  './js/vendor/three.module.min.js',
+  './js/research.js',
+  './js/direct-python.js',
   './js/app.js',
   './js/store.js',
   './js/providers.js',

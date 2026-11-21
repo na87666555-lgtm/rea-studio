@@ -6,12 +6,14 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src *; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#14122b">
-  <meta name="description" content="Rea Studio: अपनी API key से किसी भी AI provider के मॉडल चलाने वाला स्वतंत्र चैट ऐप, जिसमें कई काम एक साथ चलते हैं।">
+  <meta name="description" content="Rea Studio में सार्वजनिक स्रोत पढ़ें, 3D ऐनिमेशन बनाएँ और अपने जुड़े AI मॉडलों के साथ चैट करें।">
   <title>Rea Studio</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/animation.css">
+  <script type="module" src="js/animation.js"></script>
   <script type="module" src="js/app.js"></script>
 </head>
 <body>
@@ -25,6 +27,8 @@
         <button type="button" class="btn primary block" data-action="new-chat">+ नई चैट</button>
         <button type="button" class="btn team-entry block" data-action="new-team">✦ तीन AI · एक चैट</button>
         <button type="button" class="btn block" data-action="official-browser">🌐 वेबसाइट लॉगिन</button>
+        <button type="button" class="btn block" id="openAnimation">◈ 3D ऐनिमेशन</button>
+        <a class="btn block call-link" href="call.html">वीडियो कॉल</a>
         <button type="button" class="btn block" data-action="show-multi">⚡ एक साथ कई काम</button>
         <button type="button" class="btn block" data-action="show-settings">⚙ API और सेटिंग्स</button>
         <button type="button" class="btn block install-btn" data-action="install" hidden>📲 ऐप इंस्टॉल करें</button>
@@ -60,6 +64,27 @@
       <section id="multiView" class="view panel" hidden></section>
     </main>
   </div>
+
+  <dialog id="animationDialog" class="dlg" aria-labelledby="animationTitle">
+    <div class="animation-content">
+      <header class="animation-header">
+        <h2 id="animationTitle">3D ऐनिमेशन</h2>
+        <button type="button" class="icon-btn" id="animationClose" aria-label="स्टूडियो बंद करें">✕</button>
+      </header>
+      <div id="animationPreview" role="img" aria-label="घूमती 3D आकृति का प्रीव्यू"></div>
+      <div class="animation-controls">
+        <label>आकृति<select id="animationShape"><option value="knot">गाँठ</option><option value="cube">घन</option><option value="sphere">गोला</option><option value="icosahedron">क्रिस्टल</option><option value="torus">छल्ला</option></select></label>
+        <label>रंग<input id="animationColor" type="color" value="#78dfc9"></label>
+        <label>गति<input id="animationSpeed" type="range" min="0.2" max="3" step="0.1" value="1"></label>
+      </div>
+      <div class="animation-buttons">
+        <button type="button" class="btn" id="animationPlay" disabled>चलाएँ</button>
+        <button type="button" class="btn primary" id="animationRecord" disabled>वीडियो रिकॉर्ड करें</button>
+        <a class="btn" id="animationDownload" download hidden>वीडियो डाउनलोड करें</a>
+      </div>
+      <p id="animationStatus" class="hint" role="status"></p>
+    </div>
+  </dialog>
 
   <dialog id="teamDialog" class="dlg team-dialog">
     <form id="teamForm">
