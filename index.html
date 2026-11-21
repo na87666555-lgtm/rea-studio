@@ -11,10 +11,10 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/app.css?ui=2">
   <link rel="stylesheet" href="css/animation.css">
   <script type="module" src="js/animation.js"></script>
-  <script type="module" src="js/app.js"></script>
+  <script type="module" src="js/app.js?ui=2"></script>
 </head>
 <body>
   <div id="app">
@@ -26,15 +26,18 @@
       <div class="drawer-buttons">
         <button type="button" class="btn primary block" data-action="new-chat">+ नई चैट</button>
         <button type="button" class="btn team-entry block" data-action="new-team">✦ तीन AI · एक चैट</button>
-        <button type="button" class="btn block" data-action="official-browser">🌐 वेबसाइट लॉगिन</button>
         <button type="button" class="btn block" id="openAnimation">◈ 3D ऐनिमेशन</button>
         <a class="btn block call-link" href="call.html">वीडियो कॉल</a>
+        <details class="drawer-options"><summary>और विकल्प</summary>
+        <button type="button" class="btn block" data-action="official-browser">वेबसाइट खाते जोड़ें</button>
         <button type="button" class="btn block" data-action="show-multi">⚡ एक साथ कई काम</button>
         <button type="button" class="btn block" data-action="show-settings">⚙ API और सेटिंग्स</button>
         <button type="button" class="btn block install-btn" data-action="install" hidden>📲 ऐप इंस्टॉल करें</button>
+        </details>
       </div>
       <div class="drawer-label">चैट</div>
       <ul id="chatList" class="chat-list"></ul>
+      <footer class="release-footer"><button type="button" id="checkUpdate" class="btn small">अपडेट जाँचें</button><span id="updateStatus" role="status"></span></footer>
     </aside>
     <div id="scrim" class="scrim" data-action="close-drawer" hidden></div>
 
@@ -90,16 +93,18 @@
     <form id="teamForm">
       <h2>✦ तीन AI · एक प्रोजेक्ट</h2>
       <label>तीनों से कैसे जुड़ें<select id="tdMode"><option value="api">मौजूदा API कनेक्शन से</option><option value="website">मेरे वेबसाइट खातों से (प्रायोगिक)</option></select></label>
-      <p id="teamApiHint" class="hint">ये तीन काम की भूमिकाएँ हैं। हर भूमिका चुने हुए API पते और मॉडल नाम को अनुरोध भेजती है। मॉडल का नाम अपने आप उसकी असली पहचान सिद्ध नहीं करता। वेबसाइट लॉगिन इस API मोड से जुड़ा नहीं है।</p>
-      <div id="teamWebsiteHint" hidden><p class="hint">वेबसाइट मोड में आपके निजी ब्राउज़र सेवा पर ChatGPT, Gemini और Claude की असली वेबसाइटें खुलेंगी। पहले हर खाते में लॉगिन करें। वेबसाइट का डिज़ाइन बदलने या लॉगिन रोके जाने पर काम रुक सकता है।</p><button type="button" class="btn" data-action="official-browser">🌐 तीनों वेबसाइटों में लॉगिन</button></div>
-      <label>प्रोजेक्ट का नाम<input id="tdTitle" maxlength="100" placeholder="मेरा साझा प्रोजेक्ट"></label>
-      <div id="teamApiFields">
-      <div id="teamMembers"></div>
-      <button type="button" class="btn small" data-action="team-add-api">+ API कनेक्शन जोड़ें</button>
-      <p class="hint">कनेक्शन का पता देख लें। “API से मॉडल जाँचें” पर उस मॉडल नाम से एक छोटा अनुरोध भेजा जाएगा; जवाब आना भी मॉडल की स्वतंत्र पहचान का प्रमाण नहीं है। हर सवाल पर कई API requests चलेंगी।</p>
-      </div>
-      <label>साझा जवाब तैयार करे<select id="tdCoordinator"><option value="0">ChatGPT</option><option value="1">Gemini</option><option value="2" selected>Claude</option></select></label>
-      <label>प्रोजेक्ट के साझा निर्देश<textarea id="tdSystem" rows="3" placeholder="उद्देश्य, ज़रूरतें और तीनों को याद रखने वाली बातें…"></textarea></label>
+      <p id="teamApiHint" class="hint">टीम आपके सहेजे हुए कनेक्शन इस्तेमाल करेगी।</p>
+      <div id="teamWebsiteHint" hidden><p class="hint" id="teamBridgeHint"></p><button type="button" class="btn" data-action="official-browser">वेबसाइट कनेक्शन खोलें</button></div>
+      <label>प्रोजेक्ट का नाम<input id="tdTitle" maxlength="100" placeholder="साझा प्रोजेक्ट (वैकल्पिक)"></label>
+      <details class="setup-options" id="teamOptions">
+        <summary>मॉडल और निर्देश बदलें</summary>
+        <div id="teamApiFields">
+          <div id="teamMembers"></div>
+          <button type="button" class="btn small" data-action="team-add-api">+ API कनेक्शन जोड़ें</button>
+        </div>
+        <label>साझा जवाब तैयार करे<select id="tdCoordinator"><option value="0">ChatGPT</option><option value="1">Gemini</option><option value="2" selected>Claude</option></select></label>
+        <label>साझा निर्देश<textarea id="tdSystem" rows="3" placeholder="तीनों को क्या ध्यान रखना चाहिए?"></textarea></label>
+      </details>
       <p id="tdStatus" class="hint" role="status"></p>
       <div class="dlg-actions">
         <button type="button" class="btn" data-action="close-dialog">रद्द</button>
@@ -110,12 +115,16 @@
 
   <dialog id="officialDialog" class="dlg official-dialog">
     <div class="project-header"><h2>🌐 वेबसाइट लॉगिन</h2><button type="button" class="btn small" data-action="close-dialog">बंद करें</button></div>
-    <p class="hint">प्रायोगिक: यह आपकी अलग ब्राउज़र सेवा पर चलता है। उस सेवा को आपके लॉगिन सत्र और स्क्रीन की पहुँच होगी। वेबसाइट की सुरक्षा-जाँच या CAPTCHA रोक सकती है; तीनों खातों में लॉगिन और जवाब मिलना अभी सुनिश्चित नहीं है।</p>
-    <label>आपकी ब्राउज़र सेवा का HTTPS पता<input id="officialUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://…"></label>
-    <label>ब्राउज़र सेवा का पासकोड<input id="officialToken" type="password" autocomplete="off" spellcheck="false"></label>
-    <div class="row wrap"><button type="button" class="btn primary" data-action="official-connect">सेवा जोड़ें</button><button type="button" class="btn" data-action="official-close-session">वेबसाइट सत्र बंद करें</button><button type="button" class="btn danger" data-action="official-forget">फोन का कनेक्शन हटाएँ</button></div>
-    <p class="hint">एक बार लिंक से जोड़ने के बाद इसी ब्राउज़र में फोन का कनेक्शन सेव रहता है; उसमें दिन की सीमा नहीं है। ऐप का डेटा या कनेक्शन हटाने पर फिर जोड़ना होगा। मुफ़्त सर्वर सो सकता है और वेबसाइटों में फिर लॉगिन करना पड़ सकता है। मुफ़्त उपयोग की सीमाएँ सेवा देने वाली कंपनियाँ तय करती हैं।</p>
-    <p id="officialStatus" class="hint" role="status">सेवा जोड़ने पर लॉगिन की स्क्रीन यहाँ खुलेगी।</p>
+    <p id="officialStatus" class="hint" role="status"></p>
+    <button type="button" class="btn primary" data-action="resume-chat">चैट पर लौटें</button>
+    <details class="setup-options" id="officialManual">
+      <summary>ब्राउज़र सेवा की सेटिंग</summary>
+      <p class="hint">अपनी निजी Rea ब्राउज़र सेवा का पता और उसी का पासकोड डालें। सेवा आपकी लॉगिन स्क्रीन देख सकती है। यहाँ Google, ChatGPT या Claude का पासवर्ड न डालें।</p>
+      <label>सेवा का HTTPS पता<input id="officialUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://…"></label>
+      <label>सेवा का पासकोड<input id="officialToken" type="password" autocomplete="off" spellcheck="false"></label>
+      <button type="button" class="btn" data-action="official-connect">सेवा जोड़ें</button>
+      <div class="row wrap" id="officialManage" hidden><button type="button" class="btn" data-action="official-close-session">सत्र बंद करें</button><button type="button" class="btn danger" data-action="official-forget">फ़ोन का कनेक्शन हटाएँ</button></div>
+    </details>
     <div id="officialControls" hidden>
       <div class="row wrap"><button type="button" class="btn small" data-action="official-site" data-site="chatgpt">ChatGPT</button><button type="button" class="btn small" data-action="official-site" data-site="gemini">Gemini</button><button type="button" class="btn small" data-action="official-site" data-site="claude">Claude</button></div>
       <p id="officialSite" class="hint"></p>

@@ -109,12 +109,14 @@ async function main() {
     await secondPage.goto(origin);
     assert.equal(startupCalls.length,0,'opening the app alone must not wake the free browser host');
     await secondPage.locator('[data-action="open-drawer"]').click();
-    await secondPage.locator('[data-action="official-browser"]').first().click();
+    await secondPage.locator('.drawer-options summary').click();
+    await secondPage.locator('.drawer-options [data-action="official-browser"]').click();
     await secondPage.waitForFunction(()=>!document.querySelector('#officialControls').hidden);
     assert.equal(await secondPage.locator('#officialToken').inputValue(),device.token);
     assert.notEqual(JSON.parse(await secondPage.evaluate(()=>sessionStorage.getItem('rea.officialBridge.session'))).session,oldSession);
     assert.ok((await secondPage.locator('#officialSite').innerText()).includes('पुष्टि बाकी'));
     assert.equal(await secondPage.locator('#officialScreen').getAttribute('src'),null);
+    await secondPage.locator('#officialManual summary').click();
     await secondPage.locator('[data-action="official-close-session"]').click();
     await secondPage.waitForFunction(()=>document.querySelector('#officialControls').hidden);
     assert.equal(JSON.parse(await secondPage.evaluate(()=>localStorage.getItem('rea.officialBridge.device'))).token,device.token);

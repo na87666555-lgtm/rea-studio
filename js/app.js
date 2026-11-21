@@ -7,12 +7,12 @@ import { enabledTools, runTool, toolSystemPrompt, toolLabel, toolSettings } from
 import { addAttachment, getFile, deleteFiles, clearFiles, blobToBase64, formatSize, KIND_ICON, PY_UPLOAD_DIR } from './files.js';
 import { renderMarkdown, escapeHtml } from './markdown.js';
 import { acquire, release } from './queue.js';
-import { TEAM_ROLES, suggestTeam, resolveTeam, runTeam } from './team.js';
+import { TEAM_ROLES, ROLE_NAMES, suggestTeam, resolveTeam, runTeam, configuredRoute, isIdentityQuestion, teamResultLabel, describeReply, routeDetails, visibleAnswer } from './team.js?ui=2';
 import { PROJECT_TOOLS, filesOf, writeProject, projectTool, projectContext, previewDocument } from './project.js';
 import { OfficialBridge, SITE_IDS, restoreOfficialBridge, clearOfficialBridgeStorage, pairOfficialBridge, parseWebsiteEdits, buildWebsitePrompt } from './official-bridge.js';
 
 // Bump together with version.json on every release.
-const APP_VERSION = '2026.11.21-1';
+const APP_VERSION = '2026.11.21-2';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const NEW_TITLE = 'नई चैट';
@@ -22,6 +22,11 @@ const MAX_TOOL_ROUNDS = 8;
 let settings = loadSettings();
 let chats = loadChats();
 let currentId = chats[0]?.id || null;
+try {
+  const reopen = sessionStorage.getItem('rea.reopenChat');
+  if (chats.some(chat => chat.id === reopen)) currentId = reopen;
+  sessionStorage.removeItem('rea.reopenChat');
+} catch { /* storage optional */ }
 let view = 'chat';
 const running = new Map(); // chatId -> { controller, phase: 'queued' | 'streaming' }
 let batch = null; // { chatIds: [] }
@@ -136,8 +141,8 @@ function renderTopbar() {
     return;
   }
   back.hidden = true;
-  chip.hidden = false;
   const chat = current();
+  chip.hidden = !chat?.team && !settings.connections.length;
   $('#topTitle').textContent = chat && chat.title !== NEW_TITLE ? chat.title : 'Rea Studio';
   if (chat?.team) {
     chip.textContent = chat.team.mode === 'website' ? '🌐 वेबसाइट टीम' : '✦ तीन AI · साथ';
@@ -174,18 +179,15 @@ function renderChatList() {
 // ---------- chat view ----------
 
 function welcomeHtml() {
-  const has = settings.connections.length > 0;
   if (current()?.team) return `<div class="welcome team-welcome">
-    <div class="team-orbit" aria-hidden="true">✦</div><h1>तीन ताकतें। एक साझा जवाब।</h1>
+    <div class="team-orbit" aria-hidden="true">✦</div><h1>टीम से पूछें</h1>
     <p>ChatGPT · Gemini · Claude</p><p class="hint">तीनों योजना, निर्माण और जाँच की अलग भूमिकाओं में काम करेंगे। ऊपर ⌘ कोड से साझा प्रोजेक्ट देखें।</p>
     <button type="button" class="btn" data-action="open-model">टीम और प्रोजेक्ट के निर्देश</button></div>`;
   return `<div class="welcome">
     <img src="icons/icon.svg" alt="" width="64" height="64">
-    <h1>चलो काम शुरू करते हैं</h1>
-    <p>सवाल पूछें, 3D ऐनिमेशन बनाएँ या Python कोड चलाएँ।</p>
-    <button type="button" class="btn team-entry" data-action="new-team">✦ ChatGPT + Gemini + Claude</button>
-    ${has ? '' : '<button type="button" class="btn primary" data-action="add-conn-direct">+ API जोड़ें</button>'}
-    <button type="button" class="btn install-btn" data-action="install"${installed ? ' hidden' : ''}>📲 ऐप इंस्टॉल करें</button>
+    <h1>क्या करना चाहते हैं?</h1>
+    <p>नीचे सवाल लिखें या कहें “लाल रंग का घूमता 3D घन बनाओ”।</p>
+    <button type="button" class="btn team-entry" data-action="new-team">तीन AI के साथ काम करें</button>
   </div>`;
 }
 
@@ -197,10 +199,11 @@ function messageHtml(chat, m, i) {
   }
   const r = running.get(chat.id);
   const isLast = i === chat.messages.length - 1;
-  const parts = m.parts && m.parts.length ? m.parts : null;
+  const answer = visibleAnswer(m, chat.messages[i - 1]?.content);
+  const parts = answer === m.content && m.parts?.length ? m.parts : null;
   let body = parts
     ? parts.map((p, pi) => (p.type === 'text' ? renderMarkdown(p.text) : toolPartHtml(p, i, pi))).join('')
-    : m.content ? renderMarkdown(m.content) : '';
+    : answer ? renderMarkdown(answer) : '';
   if (m.directPython && m.content) body = `<pre>${escapeHtml(m.content)}</pre>`;
   if (m.sources?.length) {
     const sources = m.sources.filter(s => s && publicSourceUrl(s.url)).map(s =>
@@ -232,21 +235,24 @@ function messageHtml(chat, m, i) {
       (isLast ? `<button type="button" data-action="retry" data-i="${i}">↻ फिर से</button>` : '') +
       '</div>';
   }
-  return `<div class="msg assistant" data-i="${i}"><div class="meta">${escapeHtml(m.teamRuns ? '✦ साझा जवाब' : m.model || chat.model || '')}</div>` +
-    `${m.teamRuns ? teamProgressHtml(m, i) : ''}<div class="content md">${body}</div>${extra}${actions}</div>`;
+  const meta = m.teamRuns ? teamResultLabel(m) : m.model || chat.model || '';
+  return `<div class="msg assistant" data-i="${i}"><div class="meta${m.teamRuns ? ' team-status' : ''}">${escapeHtml(meta)}${m.teamRuns ? ` · ${m.teamRuns.filter(r => r?.status === 'done').length}/3` : ''}</div>` +
+    `<div class="content md">${body}</div>${extra}${m.teamRuns ? teamProgressHtml(m, i) : ''}${actions}</div>`;
 }
 
 function teamProgressHtml(m, i) {
-  const labels = { queued: 'कतार में', working: 'काम कर रहा है', done: 'योगदान तैयार', error: 'त्रुटि', stopped: 'रुका' };
-  const phase = { drafts: 'योजना → निर्माण → जाँच', synthesis: 'साझा परिणाम तैयार हो रहा है', done: 'साझा जवाब तैयार', stopped: 'काम रुक गया', error: 'साझा जवाब पूरा नहीं हुआ' };
-  const completed = m.teamRuns.filter(r => r?.status === 'done').length;
-  return `<div class="team-progress"><div class="team-status">${phase[m.teamPhase] || 'टीम तैयारी कर रही है'} · ${completed}/3 योगदान</div>
-    <div class="team-badges">${m.teamRuns.map(r => `<span class="team-badge ${escapeHtml(r.status)}"><strong>${escapeHtml(r.label)} भूमिका</strong><span>${escapeHtml(r.model || '')}</span><span>${escapeHtml(r.provider || '')}</span><span>${labels[r.status] || 'तैयारी'}</span></span>`).join('')}</div>
-    <details class="team-contributions" data-mi="${i}"${m.teamOpen ? ' open' : ''}><summary>तीनों का योगदान देखें</summary>
-    ${m.teamRuns.map((r,i) => `<article class="team-contribution"><h3>${escapeHtml(r.label)} · ${['योजना','निर्माण','जाँच'][i]} <small>${escapeHtml(r.model)}</small></h3>
-      ${r.error ? `<p class="err-box">${escapeHtml(r.error)}</p>` : ''}${r.notice ? `<p class="hint">${escapeHtml(r.notice)}</p>` : ''}
-      <div class="md">${renderMarkdown(r.text || 'अभी योगदान नहीं आया।')}</div>
-      ${(r.steps || []).map(s => `<details><summary>🛠 ${escapeHtml(s.name)} · ${escapeHtml(s.status)}</summary><pre class="team-tool-output">${escapeHtml(s.output)}</pre></details>`).join('')}</article>`).join('')}</details></div>`;
+  const labels = { queued: 'कतार में', working: 'काम जारी है', done: 'योगदान मिला', error: 'त्रुटि', stopped: 'रुका' };
+  return `<div class="team-progress"><details class="team-contributions" data-mi="${i}"${m.teamOpen ? ' open' : ''}><summary>भूमिकाएँ और कनेक्शन देखें</summary>
+    ${m.teamRuns.map((run, index) => !run ? '' : `<article class="team-contribution"><h3>${ROLE_NAMES[index]} · ${escapeHtml(labels[run.status] || 'तैयारी')}</h3>
+      <p class="hint">${escapeHtml(routeDetails(run))}</p>
+      ${run.error ? `<p class="err-box">${escapeHtml(run.error)}</p>` : ''}${run.notice ? `<p class="hint">${escapeHtml(run.notice)}</p>` : ''}
+      <div class="md">${renderMarkdown(run.text || '')}</div>
+      ${(run.steps || []).map(s => `<details><summary>${escapeHtml(s.name)} · ${escapeHtml(s.status)}</summary><pre class="team-tool-output">${escapeHtml(s.output)}</pre></details>`).join('')}</article>`).join('')}</details></div>`;
+}
+
+function historyForModel(messages) {
+  return messages.map((message, i) => message.role === 'assistant'
+    ? { ...message, content: visibleAnswer(message, messages[i - 1]?.content) } : message);
 }
 
 function attachmentHtml(a) {
@@ -418,7 +424,21 @@ async function runGeneration(chat, direct) {
   try {
     if (direct) {
       state.phase = 'streaming';
-      if (direct.python) {
+      if (direct.identity) {
+        const prior = chat.messages.slice(0, -2).reverse().find(m =>
+          m.role === 'assistant' && !m.identity && (m.teamRuns?.length || m.content && !m.error));
+        msg.identity = true;
+        msg.model = 'Rea Studio';
+        if (prior) msg.content = 'पिछले जवाब का दर्ज विवरण\n\n' + describeReply(prior);
+        else {
+          const configured = chat.team?.mode === 'website' ? websiteTeamMembers().map(m => configuredRoute(m.conn, m.model))
+            : chat.team?.members ? chat.team.members.map(m => configuredRoute(conn(m.connectionId), m.model))
+            : c ? [configuredRoute(c, chat.model)] : [];
+          const rows = configured.map(routeDetails).filter(Boolean);
+          msg.content = 'मैं Rea Studio हूँ। इस चैट में अभी किसी मॉडल का जवाब दर्ज नहीं है।' +
+            (rows.length ? '\n\nचुने हुए कनेक्शन\n' + rows.join('\n') : '');
+        }
+      } else if (direct.python) {
         msg.directPython = true;
         msg.model = 'Python';
         msg.activity = 'Python चल रहा है…';
@@ -450,7 +470,7 @@ async function runGeneration(chat, direct) {
     let useTools = tools.length > 0;
     const baseSystem = chat.system || settings.systemPrompt || '';
     const trail = [];
-    const history = await buildHistory(chat.messages.slice(0, -1), c);
+    const history = await buildHistory(historyForModel(chat.messages.slice(0, -1)), c);
     msg.parts = [];
     const addText = t => {
       const last = msg.parts[msg.parts.length - 1];
@@ -505,6 +525,7 @@ async function runGeneration(chat, direct) {
       }
       trail.push(...toolResultMessages(c.format, results));
     }
+    Object.assign(msg, configuredRoute(c, chat.model), { route: res?.route });
     msg.stopReason = res?.stopReason || null;
     if (!msg.content && msg.stopReason !== 'refusal' && !msg.toolLimit) msg.error = { title: 'मॉडल ने खाली जवाब दिया।', detail: '' };
   } catch (e) {
@@ -535,7 +556,7 @@ async function runTeamGeneration(chat) {
   refreshStatus(chat);
   // Freeze the inputs for this run while other chats/settings remain usable.
   const sharedSettings = structuredClone(settings);
-  const sharedMessages = structuredClone(chat.messages.slice(0, -1));
+  const sharedMessages = structuredClone(historyForModel(chat.messages.slice(0, -1)));
   const sharedSystem = chat.system || sharedSettings.systemPrompt || '';
   const websiteMode = chat.team.mode === 'website';
   try {
@@ -608,7 +629,15 @@ function startAssistant(chat, direct = null) {
 function directFor(chat, text, attachments) {
   const python = parseDirectPython(text);
   if (python) return { python };
-  if (chat?.team || settings.connections.length && (chat?.model || defaultConn()?.defaultModel)) return null;
+  if (!attachments?.length && isIdentityQuestion(text)) return { identity: true };
+  if (chat?.team?.mode === 'website') {
+    if (officialBridge?.session && SITE_IDS.every(id => officialBridge.acknowledged[id])) return null;
+  } else if (chat?.team) {
+    if (settings.connections.length) return null;
+  } else {
+    const connection = conn(chat?.connectionId) || defaultConn();
+    if (connection && (chat?.model || connection.defaultModel)) return null;
+  }
   const plan = planResearch(text, settings, attachments);
   return plan ? { plan } : null;
 }
@@ -628,7 +657,7 @@ async function onSubmit(e) {
     location.assign(new URL('call.html', document.baseURI));
     return;
   }
-  const animation = !chat?.team && !pendingFiles.length && parseAnimationCommand(text);
+  const animation = !pendingFiles.length && parseAnimationCommand(text);
   if (animation) {
     try {
       await openAnimationStudio(animation);
@@ -639,19 +668,18 @@ async function onSubmit(e) {
   const direct = directFor(chat, text, pendingFiles);
   if (direct?.python?.error) { toast(direct.python.error); return; }
   if (!direct && !settings.connections.length && chat?.team?.mode !== 'website') {
-    toast('पहले एक API जोड़ें।');
-    openConnDialog(null);
+    toast('इस काम के लिए AI कनेक्शन चाहिए। सार्वजनिक खोज के लिए विषय या वेबसाइट का पता लिखें।');
     return;
   }
   if (!chat) { chat = createChat(); currentId = chat.id; }
   if (!direct && chat.team) {
     if (chat.team.mode === 'website') {
       if (officialTeamBusy) { toast('वेबसाइट टीम पहले से काम कर रही है।'); return; }
-      if (!officialBridge?.session || !SITE_IDS.every(id => officialBridge.acknowledged[id])) { toast('पहले तीनों वेबसाइटों पर लॉगिन पूरा करें।'); openOfficialDialog(); return; }
+      if (!officialBridge?.session || !SITE_IDS.every(id => officialBridge.acknowledged[id])) { toast('वेबसाइट टीम के खाते अभी तैयार नहीं हैं। उन्हें जोड़ने के लिए ऊपर टीम खोलें।'); return; }
       if ([...pendingFiles, ...chat.messages.flatMap(m => m.attachments || [])].some(a => a.kind !== 'text')) { toast('वेबसाइट मोड अभी सिर्फ टेक्स्ट और कोड फ़ाइलें भेज सकता है।'); return; }
     } else {
       try { resolveTeam(chat.team, settings.connections); }
-      catch (error) { toast(error.message); openTeamDialog(chat); return; }
+      catch (error) { toast(error.message); return; }
     }
   } else if (!direct && !conn(chat.connectionId)) {
     const d = defaultConn();
@@ -659,8 +687,7 @@ async function onSubmit(e) {
     if (!chat.model) chat.model = d.defaultModel || '';
   }
   if (!direct && !chat.team && !chat.model) {
-    toast('पहले मॉडल चुनें।');
-    openModelDialog();
+    toast('AI जवाब के लिए ऊपर मॉडल चुनें।');
     return;
   }
   input.value = '';
@@ -737,7 +764,7 @@ async function officialWebsiteTurn({ conn: connection, system, history, signal, 
   const expectedHosts = { chatgpt: ['chatgpt.com', 'chat.openai.com'], gemini: ['gemini.google.com'], claude: ['claude.ai', 'claude.com'] };
   if (!expectedHosts[site].includes(result.host) || typeof result.answer !== 'string' || !result.answer.trim()) throw new Error('वेबसाइट से नया जवाब सत्यापित नहीं हो पाया।');
   onText(result.answer);
-  return { text: result.answer, toolCalls: [], stopReason: null, assistantMessage: { role: 'assistant', content: result.answer } };
+  return { text: result.answer, route: { host: result.host, reportedModel: '' }, toolCalls: [], stopReason: null, assistantMessage: { role: 'assistant', content: result.answer } };
 }
 
 function saveWebsiteEdits(chat, index, result) {
@@ -770,7 +797,9 @@ function openOfficialDialog({ reconnect = true } = {}) {
   $('#officialToken').value = officialBridge?.token || '';
   $('#officialText').value = '';
   $('#officialControls').hidden = !officialBridge?.session;
-  officialStatus(officialBridge?.session ? 'अपनी वेबसाइट चुनें और उसकी स्क्रीन खोलें।' : 'अपनी भरोसेमंद ब्राउज़र सेवा जोड़ें।');
+  $('#officialManual').open = false;
+  $('#officialManage').hidden = !officialBridge;
+  officialStatus(officialBridge?.session ? 'अपनी वेबसाइट चुनें और उसकी स्क्रीन खोलें।' : 'यह फ़ोन निजी ब्राउज़र सेवा से नहीं जुड़ा है। सेवा का जोड़ने वाला लिंक हो तो उसे इसी ब्राउज़र में खोलें। सामान्य खोज, Python और 3D के लिए यहाँ कुछ भरना ज़रूरी नहीं है।');
   refreshOfficialSiteLabel();
   if (!$('#officialDialog').open) $('#officialDialog').showModal();
   if (reconnect && officialBridge) connectOfficial();
@@ -784,6 +813,8 @@ async function connectPairLink() {
     officialBridge = await pairOfficialBridge(pairLink.base, pairLink.code, AbortSignal.timeout(90000));
     $('#officialUrl').value = officialBridge.base;
     $('#officialToken').value = officialBridge.token;
+    $('#officialManage').hidden = false;
+    $('#officialManual').open = false;
     $('#officialControls').hidden = false;
     officialStatus('सेवा जुड़ गई। एक वेबसाइट चुनें और लॉगिन करें।');
     refreshOfficialSiteLabel();
@@ -805,6 +836,8 @@ async function connectOfficial() {
     await candidate.connect(AbortSignal.timeout(90000));
     officialBridge = candidate;
     $('#officialToken').value = candidate.token;
+    $('#officialManage').hidden = false;
+    $('#officialManual').open = false;
     $('#officialControls').hidden = false;
     officialStatus('सेवा जुड़ गई। एक वेबसाइट चुनें और लॉगिन करें।');
     refreshOfficialSiteLabel();
@@ -860,6 +893,7 @@ async function closeOfficialSession(forget = false) {
   catch { officialStatus('सर्वर से संपर्क नहीं हुआ; सत्र निष्क्रिय होने पर बंद होगा।'); }
   finally {
     if (forget) officialBridge = null;
+    $('#officialManage').hidden = !officialBridge;
     setOfficialBusy(false); $('#officialControls').hidden = true; $('#officialScreen').removeAttribute('src');
     $('#officialToken').value = officialBridge?.token || '';
     refreshOfficialSiteLabel();
@@ -871,7 +905,10 @@ function syncTeamMode() {
   $('#teamApiFields').hidden = website;
   $('#teamApiHint').hidden = website;
   $('#teamWebsiteHint').hidden = !website;
-  $('#teamApiFields').querySelectorAll('input, select').forEach(el => { el.required = !website; });
+  $('#teamBridgeHint').textContent = officialBridge
+    ? 'इस फ़ोन का निजी ब्राउज़र कनेक्शन सहेजा गया है।'
+    : 'इस मोड के लिए निजी ब्राउज़र सेवा चाहिए। सामान्य चैट में खोज और 3D अभी चला सकते हैं।';
+  $('#tdStatus').textContent = website || settings.connections.length ? '' : 'AI टीम शुरू करने के लिए एक कनेक्शन जोड़ें।';
 }
 
 let projectDialogChat = null;
@@ -946,11 +983,11 @@ function renderTeamMembers() {
   $('#teamMembers').innerHTML = teamDraft.members.map((m, i) => {
     const c = conn(m.connectionId);
     return `<fieldset class="team-member"><legend>${TEAM_ROLES[i].label} की भूमिका</legend>
-      <label>API कनेक्शन<select id="tdConn${i}" data-team-conn="${i}" required>
+      <label>API कनेक्शन<select id="tdConn${i}" data-team-conn="${i}">
         <option value="">कनेक्शन चुनें</option>${settings.connections.map(c => `<option value="${escapeHtml(c.id)}"${c.id === m.connectionId ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}</select></label>
-      <label>मॉडल<input id="tdModel${i}" list="tdModels${i}" value="${escapeHtml(m.model)}" required autocomplete="off" spellcheck="false" placeholder="${TEAM_ROLES[i].label} मॉडल का नाम"></label>
+      <label>मॉडल<input id="tdModel${i}" list="tdModels${i}" value="${escapeHtml(m.model)}" autocomplete="off" spellcheck="false" placeholder="${TEAM_ROLES[i].label} मॉडल का नाम"></label>
       <datalist id="tdModels${i}">${(c?.models || []).map(model => `<option value="${escapeHtml(model)}"></option>`).join('')}</datalist>
-      <p class="hint">अनुरोध का API पता: ${escapeHtml(c?.baseUrl || 'पहले कनेक्शन चुनें')}<br>मॉडल का नाम चुना या पहले से भरा हो सकता है; उसकी पहचान अभी सत्यापित नहीं है।</p>
+      <p class="hint">${escapeHtml(c?.baseUrl || 'पहले कनेक्शन चुनें')}</p>
       <div class="row wrap"><button type="button" class="btn small" data-action="team-fetch" data-i="${i}">↻ API से मॉडल सूची लाओ</button><button type="button" class="btn small" data-action="team-test" data-i="${i}">✓ API से मॉडल जाँचें</button></div><p class="hint" id="tdCheck${i}" role="status"></p></fieldset>`;
   }).join('');
 }
@@ -961,6 +998,7 @@ function openTeamDialog(chat = null) {
   teamDraft = structuredClone(chat?.team || { mode: 'api', members: suggestTeam(settings.connections), coordinator: 2 });
   if (!Array.isArray(teamDraft.members) || teamDraft.members.length !== 3) teamDraft.members = suggestTeam(settings.connections);
   $('#tdMode').value = teamDraft.mode === 'website' ? 'website' : 'api';
+  $('#teamOptions').open = false;
   $('#tdTitle').value = chat?.title || '';
   $('#tdSystem').value = chat?.system || '';
   $('#tdCoordinator').value = String(teamDraft.coordinator ?? 2);
@@ -1013,7 +1051,7 @@ function saveTeamDialog(e) {
   const mode = $('#tdMode').value;
   if (mode !== 'website') {
     try { resolveTeam(teamDraft, settings.connections); }
-    catch (error) { $('#tdStatus').textContent = error.message; return; }
+    catch (error) { $('#teamOptions').open = true; $('#tdStatus').textContent = error.message; return; }
   }
   let chat = editingTeamId ? chatById(editingTeamId) : null;
   if (editingTeamId && !chat) { $('#tdStatus').textContent = 'यह चैट हट चुकी है। नई टीम बनाएँ।'; return; }
@@ -1310,24 +1348,25 @@ function renderSettings() {
     <div class="conn-list">${settings.connections.length ? settings.connections.map(connCard).join('') : '<p class="muted">अभी कोई API नहीं जोड़ा गया।</p>'}</div>
     <button type="button" class="btn primary" data-action="add-conn">+ नया API जोड़ें</button>
 
-    <h2>🛠 टूल्स (खोज और कोड)</h2>
+    <details class="setup-options"><summary>खोज, कोड और साझा निर्देश</summary>
     ${toolSettingsHtml()}
 
     <h2>सभी चैट के लिए डिफ़ॉल्ट निर्देश</h2>
     <textarea id="globalSystem" rows="3" placeholder="जैसे: हमेशा आसान हिंदी में जवाब दो।">${escapeHtml(settings.systemPrompt || '')}</textarea>
 
+    </details>
     <h2>फ़ोन पर ऐप की तरह इंस्टॉल करें</h2>
     ${installed
       ? '<p class="muted">✓ यह ऐप इंस्टॉल होकर चल रहा है।</p>'
       : '<button type="button" class="btn primary install-btn" data-action="install">📲 अभी इंस्टॉल करें</button>'}
 
-    <h2>डेटा</h2>
+    <details class="setup-options"><summary>डेटा और बैकअप</summary>
     <div class="row wrap">
       <button type="button" class="btn" data-action="export">⬇ चैट का बैकअप</button>
       <button type="button" class="btn danger" data-action="clear-chats">सारी चैट हटाएँ</button>
       <button type="button" class="btn danger" data-action="clear-all">सब कुछ हटाएँ (keys भी)</button>
     </div>
-    <p class="muted small">बैकअप फ़ाइल में API keys नहीं होतीं।</p>
+    <p class="muted small">बैकअप फ़ाइल में API keys नहीं होतीं।</p></details>
   </div>`;
   v.querySelectorAll('[data-tool]').forEach(el => el.addEventListener('change', () => {
     settings.tools = { ...toolSettings(settings), [el.dataset.tool]: el.checked };
@@ -1503,56 +1542,114 @@ function renderBatchProgress() {
 let pendingUpdate = null;
 
 function safeToReload() {
-  return running.size === 0 && !pendingFiles.length && !$('#input').value.trim() && !document.querySelector('dialog[open]');
+  return view === 'chat' && running.size === 0 && !pendingFiles.length && !$('#input').value && !document.querySelector('dialog[open]');
 }
 
 const APP_FILES = ['./', 'index.html', 'css/app.css', 'css/animation.css', 'css/call.css', 'call.html', 'js/call.js', 'js/app.js', 'js/store.js', 'js/providers.js',
   'js/markdown.js', 'js/queue.js', 'js/team.js', 'js/research.js', 'js/direct-python.js', 'js/animation.js', 'js/project.js', 'js/official-bridge.js', 'project-preview.html', 'js/project-preview.js', 'js/tools.js', 'js/files.js', 'js/run-worker.js', 'js/py-worker.js', 'manifest.webmanifest', 'sw.js'];
 
 let updating = false;
+let checkingUpdate = false;
+let retryUpdateTimer;
+
+function updateStatus(text, announce = false) {
+  const status = $('#updateStatus');
+  if (status) status.textContent = text;
+  if (announce) toast(text);
+}
+
+function retryPendingUpdate() {
+  clearTimeout(retryUpdateTimer);
+  if (pendingUpdate && safeToReload()) {
+    retryUpdateTimer = setTimeout(() => applyUpdate(pendingUpdate), 400);
+  }
+}
+
 async function applyUpdate(version) {
+  if (!version || updating) return;
+  const firstNotice = pendingUpdate !== version;
   pendingUpdate = version;
-  if (updating || !safeToReload()) return;
-  try {
-    if (sessionStorage.getItem('rea.reloadedFor') === version) return; // avoid reload loops
-    sessionStorage.setItem('rea.reloadedFor', version);
-    sessionStorage.setItem('rea.justUpdated', '1');
-  } catch {
+  if (!safeToReload()) {
+    updateStatus('अपडेट मिला है। चैट का काम पूरा होने पर लागू होगा।', firstNotice);
     return;
   }
   updating = true;
-  persistChats(true);
-  // Replace the browser's saved copies (GitHub Pages lets them live 10 min)
-  // with fresh ones, so the reload really starts the new version.
-  await Promise.all(APP_FILES.map(u => fetch(u, { cache: 'reload' }).catch(() => {})));
-  location.reload();
+  updateStatus('नया संस्करण लोड हो रहा है…');
+  try {
+    // Validate the entry module before reloading. Pages can publish its
+    // version marker and cached shell at different times.
+    await Promise.all(APP_FILES.map(async path => {
+      const response = await fetch(path, { cache: 'reload' });
+      if (!response.ok) throw new Error('asset unavailable');
+      if (path === 'js/app.js' && !(await response.text()).includes("const APP_VERSION = '" + version + "';")) {
+        throw new Error('release still propagating');
+      }
+    }));
+    if (!safeToReload()) {
+      updateStatus('अपडेट तैयार है। चैट का काम पूरा होने पर लागू होगा।', true);
+      return;
+    }
+    // Only confirm an update on boot when the loaded version matches.
+    try {
+      sessionStorage.setItem('rea.reloadedFor', version);
+      if (currentId) sessionStorage.setItem('rea.reopenChat', currentId);
+    } catch { /* storage optional */ }
+    persistChats(true);
+    location.reload();
+  } catch {
+    updateStatus('अपडेट अभी पूरा डाउनलोड नहीं हुआ। कुछ देर में फिर जाँचें।');
+  } finally {
+    updating = false;
+  }
 }
 
-async function checkForUpdate() {
-  if (!navigator.onLine) return;
+async function checkForUpdate(manual = false) {
+  if (checkingUpdate || updating) return;
+  if (!navigator.onLine) {
+    if (manual) updateStatus('अपडेट जाँचने के लिए इंटरनेट चालू करें।', true);
+    return;
+  }
+  checkingUpdate = true;
+  if (manual) updateStatus('अपडेट की जाँच हो रही है…');
   try {
-    const res = await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' });
-    if (!res.ok) return;
+    const res = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) throw new Error('status unavailable');
     const { version } = await res.json();
-    if (version && version !== APP_VERSION) applyUpdate(version);
+    if (typeof version !== 'string' || !version) throw new Error('missing version');
+    if (version !== APP_VERSION) await applyUpdate(version);
+    else {
+      pendingUpdate = null;
+      if (manual) updateStatus('आप नवीनतम संस्करण पर हैं · ' + APP_VERSION, true);
+    }
   } catch {
-    // offline or blocked: try again later
+    if (manual) updateStatus('अपडेट जाँच पूरी नहीं हुई। दोबारा कोशिश करें।', true);
+  } finally {
+    checkingUpdate = false;
   }
 }
 
 function startAutoUpdate() {
+  const button = $('#checkUpdate');
+  if (button) {
+    button.textContent = 'अपडेट जाँचें · ' + APP_VERSION;
+    button.addEventListener('click', () => checkForUpdate(true));
+  }
   try {
-    if (sessionStorage.getItem('rea.justUpdated')) {
-      sessionStorage.removeItem('rea.justUpdated');
-      setTimeout(() => toast('✓ ऐप अपडेट हो गया'), 400);
-    }
-  } catch { /* ignore */ }
-  setTimeout(checkForUpdate, 1500);
+    const expected = sessionStorage.getItem('rea.reloadedFor');
+    sessionStorage.removeItem('rea.reloadedFor');
+    sessionStorage.removeItem('rea.justUpdated');
+    if (expected === APP_VERSION) setTimeout(() => toast('Rea अपडेट हो गया · ' + APP_VERSION), 400);
+  } catch { /* storage optional */ }
+  setTimeout(checkForUpdate, 1200);
   setInterval(checkForUpdate, 3 * 60 * 1000);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') checkForUpdate();
   });
-  window.addEventListener('online', checkForUpdate);
+  window.addEventListener('pageshow', event => { if (event.persisted) checkForUpdate(); });
+  window.addEventListener('online', () => checkForUpdate());
+  document.addEventListener('close', retryPendingUpdate, true);
+  document.addEventListener('input', retryPendingUpdate);
+  document.addEventListener('click', retryPendingUpdate);
 }
 
 // ---------- install ----------
@@ -1604,6 +1701,10 @@ function onClick(e) {
   if (!b) return;
   const id = b.dataset.id;
   switch (b.dataset.action) {
+    case 'resume-chat':
+      $('#officialDialog').close();
+      if ($('#teamDialog').open) $('#teamDialog').close();
+      show('chat'); $('#input').focus(); break;
     case 'official-browser': openOfficialDialog(); break;
     case 'official-connect': connectOfficial(); break;
     case 'official-close-session': closeOfficialSession(); break;
@@ -1644,7 +1745,7 @@ function onClick(e) {
     case 'close-drawer': closeDrawer(); break;
     case 'new-chat': {
       const cur = current();
-      if (!cur || cur.messages.length) { const c = createChat(); currentId = c.id; }
+      if (!cur || cur.messages.length || cur.team) { const c = createChat(); currentId = c.id; }
       show('chat');
       $('#input').focus();
       break;
@@ -1658,8 +1759,9 @@ function onClick(e) {
     case 'md-fetch': mdFetch(); break;
     case 'close-dialog': b.closest('dialog').close(); break;
     case 'copy-msg': {
-      const m = current()?.messages[Number(b.dataset.i)];
-      if (m) copyText(m.content);
+      const i = Number(b.dataset.i);
+      const messages = current()?.messages;
+      if (messages?.[i]) copyText(visibleAnswer(messages[i], messages[i - 1]?.content));
       break;
     }
     case 'retry': retry(Number(b.dataset.i)); break;
@@ -1755,6 +1857,7 @@ function fitPhoneInDesktopMode() {
   const on = touch && sw > 0 && sw < 700 && ratio > 1.3;
   root.classList.toggle('force-mobile', on);
   root.style.zoom = on ? String(ratio) : '';
+  root.style.setProperty('--app-w', on ? `${sw}px` : '');
   root.style.setProperty('--app-h', on ? `${window.innerHeight / ratio}px` : '');
 }
 

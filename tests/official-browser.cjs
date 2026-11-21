@@ -63,6 +63,9 @@ async function main() {
     assert.equal(await page.locator('#teamApiFields').isHidden(), true);
     await page.locator('#tdTitle').fill('वेबसाइट परियोजना');
     await page.locator('#teamWebsiteHint [data-action="official-browser"]').click();
+    assert.equal(await page.locator('#officialUrl').isVisible(), false);
+    assert.equal(await page.locator('#officialToken').isVisible(), false);
+    await page.locator('#officialManual summary').click();
     await page.locator('#officialUrl').fill('https://bridge.test');
     await page.locator('#officialToken').fill(key);
     await page.locator('[data-action="official-connect"]').click();

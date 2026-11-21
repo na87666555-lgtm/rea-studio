@@ -304,6 +304,8 @@ export async function streamTurn({ conn, model, system, history, trail = [], too
   });
   if (!res.ok) throw await readError(res);
 
+  const route = { host: '', reportedModel: '' };
+  try { route.host = new URL(res.url).hostname; } catch { /* No URL exposed by this response. */ }
   const ctype = res.headers.get('content-type') || '';
   if (!ctype.includes('text/event-stream')) {
     // Some providers ignore `stream: true` and answer with plain JSON.
@@ -311,7 +313,8 @@ export async function streamTurn({ conn, model, system, history, trail = [], too
     if (j.error) throw new ApiError('Provider ने त्रुटि भेजी।', 0, j.error.message || JSON.stringify(j.error));
     const r = fromJson(conn, j);
     if (r.text) onText(r.text);
-    return r;
+    if (typeof j.model === 'string') route.reportedModel = j.model.trim();
+    return { ...r, route };
   }
 
   let stopReason = null;
@@ -328,6 +331,8 @@ export async function streamTurn({ conn, model, system, history, trail = [], too
     } catch {
       continue;
     }
+    const reported = anth && j.type === 'message_start' ? j.message?.model ?? j.model : j.model;
+    if (typeof reported === 'string' && reported.trim()) route.reportedModel = reported.trim();
     if (anth) {
       if (j.type === 'content_block_start') {
         const b = { ...j.content_block };
@@ -377,7 +382,7 @@ export async function streamTurn({ conn, model, system, history, trail = [], too
     const content = blocks.filter(b => b && (b.type !== 'text' || b.text));
     for (const b of content) if (b.type === 'tool_use' && b._json !== undefined) { b.input = parseArgs(b._json); delete b._json; }
     const toolCalls = content.filter(b => b.type === 'tool_use').map(b => ({ id: b.id, name: b.name, args: b.input || {} }));
-    return { text, toolCalls, stopReason, assistantMessage: { role: 'assistant', content } };
+    return { text, toolCalls, stopReason, assistantMessage: { role: 'assistant', content }, route };
   }
   const list = calls.filter(c => c && c.name);
   list.forEach((c, i) => { if (!c.id) c.id = `call_${Date.now().toString(36)}_${i}`; });
@@ -385,13 +390,13 @@ export async function streamTurn({ conn, model, system, history, trail = [], too
   if (list.length) {
     assistantMessage.tool_calls = list.map(c => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.args || '{}' } }));
   }
-  return { text, toolCalls: list.map(c => ({ id: c.id, name: c.name, args: parseArgs(c.args) })), stopReason, assistantMessage };
+  return { text, toolCalls: list.map(c => ({ id: c.id, name: c.name, args: parseArgs(c.args) })), stopReason, assistantMessage, route };
 }
 
 // Plain streaming chat without tools (used by the connection test).
 export async function streamChat({ conn, model, system, messages, signal, onDelta }) {
   const r = await streamTurn({ conn, model, system, history: messages, signal, onText: onDelta });
-  return { stopReason: r.stopReason };
+  return { stopReason: r.stopReason, route: r.route };
 }
 
 export async function listModels(conn, signal) {

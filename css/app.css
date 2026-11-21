@@ -62,14 +62,17 @@ a { color: var(--accent); }
   padding: 12px;
   padding-top: max(12px, env(safe-area-inset-top));
   gap: 8px;
-  overflow: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
 }
+.drawer > * { flex: none; }
 .drawer-head { display: flex; align-items: center; justify-content: space-between; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; }
 .drawer-buttons { display: flex; flex-direction: column; gap: 8px; }
 .drawer-buttons .call-link { text-align: center; text-decoration: none; }
 .drawer-label { margin-top: 8px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
-.chat-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
+.chat-list { list-style: none; margin: 0; padding: 0; }
 .chat-item { display: flex; align-items: center; border-radius: 10px; }
 .chat-item.active { background: var(--panel-2); }
 .chat-open {
@@ -114,7 +117,6 @@ a { color: var(--accent); }
 
 /* Shared project team: one timeline, contributions tucked into each answer. */
 .team-entry { border-color: var(--violet); background: var(--panel-2); }
-.team-dialog { width: min(640px, calc(100vw - 24px)); }
 .team-member { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin: 14px 0; min-width: 0; }
 .team-member legend { color: var(--accent); padding: 0 6px; font-weight: 700; }
 .team-member input, .team-member select { width: 100%; min-width: 0; }
@@ -138,7 +140,6 @@ a { color: var(--accent); }
 .project-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .project-editor { width: 100%; min-height: 220px; font-family: var(--mono); font-size: 13px; tab-size: 2; }
 .project-preview { width: 100%; height: 360px; border: 1px solid var(--border); background: white; border-radius: 8px; margin-top: 12px; }
-.official-dialog { width: min(650px, calc(100vw - 20px)); }
 .official-screen { display: block; width: min(100%, 412px); height: auto; border: 1px solid var(--border); border-radius: 8px; margin: 8px auto; touch-action: none; cursor: pointer; }
 .official-screen[aria-busy="true"] { opacity: .65; pointer-events: none; }
 
@@ -291,13 +292,26 @@ details label { margin-top: 10px; }
 
 /* dialogs */
 .dlg {
-  width: min(560px, 94vw); max-height: 90dvh; border: 1px solid var(--border); border-radius: 16px;
+  width: min(560px, calc(100% - 24px)); max-width: calc(100% - 24px); max-height: calc(100dvh - 24px); overflow: auto; overscroll-behavior: contain; border: 1px solid var(--border); border-radius: 16px;
   background: var(--panel); color: var(--text); padding: 0;
 }
 .dlg::backdrop { background: rgba(0, 0, 0, .55); }
 .dlg form { display: flex; flex-direction: column; gap: 12px; padding: 18px; }
 .dlg h2 { margin: 0; font-size: 19px; }
-.dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.dlg-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.dlg:is(.official-dialog, .team-dialog) { width: min(640px, calc(100% - 24px)); }
+.official-dialog[open] { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.official-dialog > * { flex: none; min-width: 0; }
+.official-dialog .project-header .btn { flex: none; }
+.dlg .btn { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.dlg :is(label, input, select, textarea) { min-width: 0; }
+.official-dialog #officialControls, .setup-options[open], .drawer-options[open] { display: grid; gap: 10px; }
+.setup-options > summary, .drawer-options > summary { padding: 3px 0; }
+.setup-options[open] > :not(summary), .drawer-options[open] > :not(summary) { margin-top: 8px; }
+.team-dialog .team-member { margin: 0; }
+.team-dialog #teamMembers { display: grid; gap: 12px; }
+.team-dialog #teamApiFields > :not(:first-child) { margin-top: 8px; }
+
 
 .toast {
   position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom)); transform: translateX(-50%);
@@ -322,14 +336,14 @@ details label { margin-top: 10px; }
    the phone's width; these rules restore the phone layout regardless of the
    (wide) viewport the browser reports. */
 html.force-mobile .drawer {
-  position: fixed; top: 0; bottom: 0; left: 0; z-index: 40; width: 300px; height: var(--app-h);
+  position: fixed; top: 0; bottom: 0; left: 0; z-index: 40; width: min(300px, calc(var(--app-w) - 32px)); height: var(--app-h);
   transform: translateX(-102%); transition: transform .2s ease;
 }
 html.force-mobile .drawer.open { transform: none; }
 html.force-mobile .only-mobile { display: inline-flex !important; }
 html.force-mobile .scrim:not([hidden]) { display: block !important; }
 html.force-mobile .chip { max-width: 190px; }
-html.force-mobile .dlg { width: 390px; max-width: none; max-height: calc(var(--app-h) - 40px); }
+html.force-mobile .dlg { max-width: calc(var(--app-w) - 24px); max-height: calc(var(--app-h) - 24px); }
 html.force-mobile .toast { max-width: 360px; }
 
 /* tools */
@@ -385,3 +399,8 @@ input[type=checkbox] { width: 20px; height: 20px; padding: 0; flex-shrink: 0; ac
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 6px 10px;
   font-size: 13px; overflow-wrap: anywhere;
 }
+
+.release-footer { flex: none; margin-top: auto; }
+.release-footer .btn { color: var(--muted); }
+#updateStatus { display: block; font-size: .875rem; color: var(--muted); }
+#updateStatus:not(:empty) { margin-top: 4px; }

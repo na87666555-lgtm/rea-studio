@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runTeam, resolveTeam, suggestTeam } from '../js/team.js';
+import { runTeam, resolveTeam, suggestTeam, isIdentityQuestion, teamResultLabel, visibleAnswer } from '../js/team.js';
 
 const connections = ['gpt-test', 'gemini-test', 'claude-test'].map((model, i) => ({
   id: `api-${i}`, defaultModel: model, models: [model], apiKey: `secret-${i}`,
@@ -143,4 +143,32 @@ test('planner cannot write project files; implementer and reviewer can', async (
     } });
   await runTeam(s.opts);
   assert.deepEqual(writes, ['gemini-test', 'claude-test']);
+});
+
+test('a single successful role is returned directly without synthesis', async () => {
+  const calls = [];
+  const s = setup({ turn: async args => {
+    calls.push(args.model);
+    if (args.model !== 'gemini-test') throw new Error('Unavailable');
+    args.onText('only implementation');
+    return { ...response(), route: { host: 'coarena.ai', reportedModel: 'vendor-model-id' } };
+  } });
+  const result = await runTeam(s.opts);
+  assert.deepEqual(calls, ['gpt-test', 'gemini-test', 'claude-test']);
+  assert.equal(s.events.output, 'only implementation');
+  assert.equal(result.coordinator, null);
+  assert.deepEqual(s.events.phases, ['drafts', 'done']);
+  assert.equal(s.events.members[1].route.host, 'coarena.ai');
+});
+
+test('identity uses recorded roles and routes for older partial replies', () => {
+  const question = 'तुम कहां से जवाब दे रहे हो तुम कौन सा मॉडल';
+  assert.ok(isIdentityQuestion(question));
+  assert.equal(isIdentityQuestion('Which model is better for coding?'), false);
+  const message = { content: 'I am the official model.', teamPhase:'done', teamSummary:{completed: 1},
+    teamRuns:[{status:'done', provider:'Coarena', model:'example-gpt', text:'sole contribution'}, {status:'error'}, {status:'stopped'}] };
+  assert.equal(teamResultLabel(message), 'एक भूमिका का जवाब');
+  assert.match(visibleAnswer(message, question), /कनेक्शन · Coarena/);
+  assert.doesNotMatch(visibleAnswer(message, question), /official model|जवाब का होस्ट/);
+  assert.equal(visibleAnswer(message, 'something else'), 'sole contribution');
 });

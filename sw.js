@@ -6,7 +6,7 @@
 // does NOT change with app releases; change it only when this file's logic
 // changes. A new service worker waits until the app is closed before taking
 // over (no skipWaiting/claim), so it never swaps in during a page load.
-const CACHE = 'rea-studio-sw8';
+const CACHE = 'rea-studio-sw9';
 const ASSETS = [
   './',
   './index.html',
@@ -20,6 +20,9 @@ const ASSETS = [
   './js/research.js',
   './js/direct-python.js',
   './js/app.js',
+  './js/app.js?ui=2',
+  './js/team.js?ui=2',
+  './css/app.css?ui=2',
   './js/store.js',
   './js/providers.js',
   './js/markdown.js',
@@ -50,7 +53,7 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))),
+      .then(keys => Promise.all(keys.filter(k => /^rea-studio-sw\d+$/.test(k) && k !== CACHE).map(k => caches.delete(k)))),
   );
 });
 
@@ -63,11 +66,11 @@ self.addEventListener('fetch', event => {
   // offline fallback. version.json is never cached.
   if (new URL(req.url).pathname.endsWith('/version.json')) return;
   event.respondWith(
-    fetch(req, { cache: 'no-cache' })
+    fetch(req, { cache: req.cache === 'reload' ? 'reload' : 'no-cache' })
       .then(res => {
         if (res.ok) {
           const copy = res.clone();
-          caches.open(CACHE).then(c => c.put(req, copy));
+          event.waitUntil(caches.open(CACHE).then(c => c.put(req, copy)).catch(() => {}));
         }
         return res;
       })

@@ -52,6 +52,8 @@ async function main() {
     await page.goto(base);
     // A new user can add a connection without leaving the team setup.
     await page.locator('.welcome [data-action="new-team"]').click();
+    assert.equal(await page.locator('#teamMembers').isVisible(), false);
+    await page.locator('#teamOptions summary').click();
     await page.locator('[data-action="team-add-api"]').click();
     await page.locator('#cdPreset').selectOption('custom-openai');
     await page.locator('#cdName').fill('Test OpenAI');
@@ -71,6 +73,7 @@ async function main() {
     await page.reload();
     await page.locator('.welcome [data-action="new-team"]').click();
     await page.locator('#tdTitle').fill('सोलर प्रोजेक्ट');
+    await page.locator('#teamOptions summary').click();
     await page.locator('#tdSystem').fill('बजट ₹50,000 है। आसान हिंदी में जवाब दें।');
     assert.ok((await page.locator('#teamMembers').innerText()).includes('https://gemini.test/v1'));
     await page.locator('#tdModel1').fill('not-a-listed-model');
@@ -105,7 +108,7 @@ async function main() {
     assert.equal(await page.locator('#topTitle').innerText(), 'सोलर प्रोजेक्ट');
     calls.length = 0; failGemini = true;
     await page.locator('#input').fill('इसकी लागत और समझाएँ।'); await page.locator('#sendBtn').click();
-    await page.waitForFunction(() => [...document.querySelectorAll('.team-status')].at(-1)?.textContent.includes('साझा जवाब तैयार'));
+    await page.waitForFunction(() => [...document.querySelectorAll('.team-status')].at(-1)?.textContent.includes('आंशिक साझा जवाब तैयार'));
     assert.ok((await page.locator('.team-status').last().innerText()).includes('2/3'));
     assert.ok(calls.every(c => JSON.stringify(c).includes('मेरे घर के लिए सोलर')));
     assert.ok(calls.every(c => JSON.stringify(c).includes('यह तीनों का साझा जवाब')));
@@ -145,6 +148,34 @@ async function main() {
     await page.locator('#input').fill('एक मॉडल से सामान्य चैट'); await page.locator('#sendBtn').click();
     await page.waitForFunction(() => document.querySelector('.msg.assistant .content')?.textContent.includes('gpt-test'));
     assert.equal(await page.locator('.team-progress').count(), 0);
+    // Older records kept a role label and configured model but no response host.
+    const identity = 'तुम कहां से जवाब दे रहे हो तुम कौन सा मॉडल';
+    await page.evaluate(question => {
+      const messages = [
+        { role: 'user', content: question },
+        { role: 'assistant', content: 'I am the official ChatGPT model.', teamPhase: 'done',
+          teamSummary: { completed: 1, coordinator: 'ChatGPT' },
+          teamRuns: ['done','error','error'].map((status, i) => ({
+            status, label: ['ChatGPT','Gemini','Claude'][i], provider: 'Coarena', model: 'selected-model-' + i,
+            text: i ? '' : 'I am the official ChatGPT model.', steps: [],
+          })) },
+      ];
+      localStorage.setItem('rea.v1.chats', JSON.stringify([{ id:'old-chat', title:'पुरानी टीम', team: { members: [] }, messages }]));
+    }, identity);
+    await page.reload();
+    assert.match(await page.locator('.team-status').innerText(), /एक भूमिका का जवाब · 1\/3/);
+    const oldBody = await page.locator('.msg.assistant > .content').innerText();
+    assert.match(oldBody, /Coarena/);
+    assert.match(oldBody, /चुना मॉडल · selected-model-0/);
+    assert.doesNotMatch(oldBody, /official ChatGPT|जवाब का होस्ट/);
+    assert.equal(await page.locator('.team-contributions').evaluate(e => e.open), false);
+    const previousCalls = calls.length;
+    await page.locator('#input').fill(identity);
+    await page.locator('#sendBtn').click();
+    const identityAnswer = page.locator('.msg.assistant > .content').last();
+    await page.waitForFunction(() => [...document.querySelectorAll('.msg.assistant > .content')].at(-1)?.textContent.includes('पिछले जवाब का दर्ज विवरण'));
+    assert.match(await identityAnswer.innerText(), /Coarena/);
+    assert.equal(calls.length, previousCalls);
     assert.deepEqual(errors, []);
     console.log('PASS: mobile team setup, all 3 adapters, shared files/history, synthesis streaming, partial failure, stop, persistence, offline shell, normal chat; no page errors.');
     await context.close();
