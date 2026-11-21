@@ -5,6 +5,7 @@ const { readFile, stat } = require('node:fs/promises');
 const { existsSync } = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
+const { openTeamSettings } = require('./ui-helpers.cjs');
 
 async function main() {
   const root = path.resolve(__dirname, '..');
@@ -51,7 +52,7 @@ async function main() {
     });
     await page.goto(base);
     // A new user can add a connection without leaving the team setup.
-    await page.locator('.welcome [data-action="new-team"]').click();
+    await openTeamSettings(page);
     assert.equal(await page.locator('#teamMembers').isVisible(), false);
     await page.locator('#teamOptions summary').click();
     await page.locator('[data-action="team-add-api"]').click();
@@ -71,7 +72,7 @@ async function main() {
     }));
     await page.evaluate(connections => localStorage.setItem('rea.v1.settings', JSON.stringify({ connections, tools: { enabled: false } })), connections);
     await page.reload();
-    await page.locator('.welcome [data-action="new-team"]').click();
+    await openTeamSettings(page);
     await page.locator('#tdTitle').fill('सोलर प्रोजेक्ट');
     await page.locator('#teamOptions summary').click();
     await page.locator('#tdSystem').fill('बजट ₹50,000 है। आसान हिंदी में जवाब दें।');

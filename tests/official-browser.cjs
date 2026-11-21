@@ -5,6 +5,7 @@ const { readFile, stat } = require('node:fs/promises');
 const { existsSync } = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
+const { openTeamSettings } = require('./ui-helpers.cjs');
 
 async function main() {
   const root = path.resolve(__dirname, '..');
@@ -58,7 +59,7 @@ async function main() {
     await page.evaluate(existingApiKey => localStorage.setItem('rea.v1.settings', JSON.stringify({ connections: [{ id: 'existing', name: 'Coarena', baseUrl: 'https://coarena.ai/api/v1', format: 'openai', apiKey: existingApiKey, defaultModel: 'test-existing' }], defaultConnectionId: 'existing' })), existingApiKey);
     await page.reload();
     screenshot = (await page.screenshot({ type: 'jpeg' })).toString('base64');
-    await page.locator('.welcome [data-action="new-team"]').click();
+    await openTeamSettings(page);
     await page.locator('#tdMode').selectOption('website');
     assert.equal(await page.locator('#teamApiFields').isHidden(), true);
     await page.locator('#tdTitle').fill('वेबसाइट परियोजना');

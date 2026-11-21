@@ -12,7 +12,7 @@ import { PROJECT_TOOLS, filesOf, writeProject, projectTool, projectContext, prev
 import { OfficialBridge, SITE_IDS, restoreOfficialBridge, clearOfficialBridgeStorage, pairOfficialBridge, parseWebsiteEdits, buildWebsitePrompt } from './official-bridge.js';
 
 // Bump together with version.json on every release.
-const APP_VERSION = '2026.11.21-2';
+const APP_VERSION = '2026.11.21-3';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const NEW_TITLE = 'नई चैट';
@@ -35,9 +35,13 @@ let editingConnId = null;
 let teamDraft = null;
 let editingTeamId = null;
 let officialBridge = restoreOfficialBridge();
-const pairParams = new URLSearchParams(location.hash.slice(1));
-const pairLink = pairParams.has('rea_pair') && pairParams.has('bridge') ? { code: pairParams.get('rea_pair'), base: pairParams.get('bridge') } : null;
-if (pairLink) history.replaceState(null, '', location.pathname + location.search);
+let pairLink = takePairingLink();
+function takePairingLink() {
+  const params = new URLSearchParams(location.hash.slice(1));
+  if (!params.has('rea_pair')) return null;
+  history.replaceState(null, '', location.pathname + location.search);
+  return { code: params.get('rea_pair'), base: params.get('bridge') };
+}
 let officialSite = 'chatgpt';
 let officialActionBusy = false;
 let officialTeamBusy = false;
@@ -179,15 +183,11 @@ function renderChatList() {
 // ---------- chat view ----------
 
 function welcomeHtml() {
-  if (current()?.team) return `<div class="welcome team-welcome">
-    <div class="team-orbit" aria-hidden="true">✦</div><h1>टीम से पूछें</h1>
-    <p>ChatGPT · Gemini · Claude</p><p class="hint">तीनों योजना, निर्माण और जाँच की अलग भूमिकाओं में काम करेंगे। ऊपर ⌘ कोड से साझा प्रोजेक्ट देखें।</p>
-    <button type="button" class="btn" data-action="open-model">टीम और प्रोजेक्ट के निर्देश</button></div>`;
   return `<div class="welcome">
     <img src="icons/icon.svg" alt="" width="64" height="64">
     <h1>क्या करना चाहते हैं?</h1>
-    <p>नीचे सवाल लिखें या कहें “लाल रंग का घूमता 3D घन बनाओ”।</p>
-    <button type="button" class="btn team-entry" data-action="new-team">तीन AI के साथ काम करें</button>
+    <p>सवाल पूछें, सार्वजनिक पन्ना पढ़ने को दें या लिखें “लाल रंग का घूमता 3D घन बनाओ”।</p>
+    <p class="hint">जो काम चल रहा होगा, उसकी प्रगति और परिणाम यहीं दिखेंगे।</p>
   </div>`;
 }
 
@@ -413,6 +413,7 @@ function refreshStatus(chat) {
 // ---------- generation ----------
 
 async function runGeneration(chat, direct) {
+  if (direct?.reconnect) return reconnectWebsiteChat(chat);
   if (chat.team && !direct) return runTeamGeneration(chat);
   const c = conn(chat.connectionId);
   const msg = lastMsg(chat);
@@ -424,9 +425,13 @@ async function runGeneration(chat, direct) {
   try {
     if (direct) {
       state.phase = 'streaming';
-      if (direct.identity) {
+      if (direct.notice) {
+        msg.serviceNotice = true;
+        msg.model = 'Rea Studio · स्थिति';
+        msg.content = direct.notice;
+      } else if (direct.identity) {
         const prior = chat.messages.slice(0, -2).reverse().find(m =>
-          m.role === 'assistant' && !m.identity && (m.teamRuns?.length || m.content && !m.error));
+          m.role === 'assistant' && !m.identity && !m.serviceNotice && (m.teamRuns?.length || m.content && !m.error));
         msg.identity = true;
         msg.model = 'Rea Studio';
         if (prior) msg.content = 'पिछले जवाब का दर्ज विवरण\n\n' + describeReply(prior);
@@ -610,7 +615,10 @@ async function runTeamGeneration(chat) {
     if (controller.signal.aborted) msg.stopped = true;
     else msg.error = friendlyError(error);
   } finally {
-    if (websiteMode) officialTeamBusy = false;
+    if (websiteMode) {
+      officialTeamBusy = false;
+      if (pairLink) queueMicrotask(connectPairLink);
+    }
     delete msg.activity;
     delete msg.pending;
     running.delete(chat.id);
@@ -628,18 +636,71 @@ function startAssistant(chat, direct = null) {
 
 function directFor(chat, text, attachments) {
   const python = parseDirectPython(text);
-  if (python) return { python };
+  if (python) return python.error ? { notice: python.error } : { python };
   if (!attachments?.length && isIdentityQuestion(text)) return { identity: true };
   if (chat?.team?.mode === 'website') {
     if (officialBridge?.session && SITE_IDS.every(id => officialBridge.acknowledged[id])) return null;
+    if (officialBridge && !officialTeamBusy && !officialActionBusy) return { reconnect: true };
   } else if (chat?.team) {
-    if (settings.connections.length) return null;
+    try { resolveTeam(chat.team, settings.connections); return null; } catch { /* public tasks still work */ }
   } else {
     const connection = conn(chat?.connectionId) || defaultConn();
     if (connection && (chat?.model || connection.defaultModel)) return null;
   }
   const plan = planResearch(text, settings, attachments);
   return plan ? { plan } : null;
+}
+
+function requestRoute(chat, text, attachments, skipReconnect = false) {
+  let direct = directFor(chat, text, attachments);
+  if (direct?.reconnect && skipReconnect) {
+    const plan = planResearch(text, settings, attachments);
+    direct = plan ? { plan } : null;
+  }
+  if (direct) return direct;
+  const unavailable = detail => ({ notice: detail + '\n\nइसी चैट में सार्वजनिक विषय पूछ सकते हैं, पढ़ने के लिए वेबसाइट का पता दे सकते हैं, Python कोड चला सकते हैं या साधारण 3D आकृति बनवा सकते हैं।' });
+  if (chat?.team?.mode === 'website') {
+    if (officialTeamBusy || officialActionBusy) return { notice: 'वेबसाइट सेवा दूसरे काम में लगी है। वह पूरा होने पर यह संदेश फिर भेजें।' };
+    if (!officialBridge?.session || !SITE_IDS.every(id => officialBridge.acknowledged[id])) return unavailable('तीनों वेबसाइट खातों का लॉगिन अभी तैयार नहीं है, इसलिए इस काम पर उनका साझा जवाब शुरू नहीं हुआ।');
+    if ([...(attachments || []), ...chat.messages.flatMap(m => m.attachments || [])].some(a => a.kind !== 'text')) return { notice: 'वेबसाइट टीम अभी टेक्स्ट और कोड फ़ाइलें पढ़ सकती है। इस तरह की संलग्न फ़ाइल उसमें नहीं भेजी गई।' };
+  } else if (chat?.team) {
+    try { resolveTeam(chat.team, settings.connections); } catch { return unavailable('तीनों भूमिकाओं के लिए पूरा AI कनेक्शन उपलब्ध नहीं है।'); }
+  } else {
+    const c = conn(chat?.connectionId) || defaultConn();
+    if (!c || !(chat?.model || c.defaultModel)) return unavailable('इस काम के लिए AI का जवाब चाहिए, लेकिन इस फोन में कोई तैयार मॉडल कनेक्शन उपलब्ध नहीं है।');
+    chat.connectionId = c.id;
+    if (!chat.model) chat.model = c.defaultModel;
+  }
+  return null;
+}
+
+async function reconnectWebsiteChat(chat) {
+  const msg = lastMsg(chat), user = chat.messages.at(-2);
+  const bridge = officialBridge;
+  const controller = new AbortController();
+  running.set(chat.id, { controller, phase: 'streaming' });
+  officialTeamBusy = true;
+  msg.activity = 'सहेजी हुई वेबसाइट सेवा से जुड़ रहे हैं…';
+  refreshStatus(chat);
+  let failure = '';
+  const timer = setTimeout(() => controller.abort(new Error('वेबसाइट सेवा ने समय पर जवाब नहीं दिया।')), 90000);
+  try { await bridge.connect(controller.signal); controller.signal.throwIfAborted(); }
+  catch (e) {
+    bridge.session = ''; bridge.acknowledged = {};
+    failure = e.message || 'वेबसाइट सेवा से संपर्क नहीं हुआ।';
+  }
+  finally {
+    clearTimeout(timer); officialTeamBusy = false; running.delete(chat.id); delete msg.activity;
+    if (pairLink) queueMicrotask(connectPairLink);
+  }
+  if (controller.signal.aborted) {
+    msg.stopped = true; delete msg.pending;
+    if (controller.signal.reason?.name !== 'AbortError') msg.error = { title: failure };
+    touch(chat); persistChats(true); refreshStatus(chat); return;
+  }
+  const route = requestRoute(chat, user.content, user.attachments, true);
+  if (failure && route?.notice) route.notice = failure + '\n\n' + route.notice;
+  return runGeneration(chat, route);
 }
 
 async function onSubmit(e) {
@@ -665,31 +726,11 @@ async function onSubmit(e) {
     } catch (error) { toast(error.message || '3D दृश्य नहीं खुल सका।'); }
     return;
   }
-  const direct = directFor(chat, text, pendingFiles);
-  if (direct?.python?.error) { toast(direct.python.error); return; }
-  if (!direct && !settings.connections.length && chat?.team?.mode !== 'website') {
-    toast('इस काम के लिए AI कनेक्शन चाहिए। सार्वजनिक खोज के लिए विषय या वेबसाइट का पता लिखें।');
-    return;
-  }
   if (!chat) { chat = createChat(); currentId = chat.id; }
-  if (!direct && chat.team) {
-    if (chat.team.mode === 'website') {
-      if (officialTeamBusy) { toast('वेबसाइट टीम पहले से काम कर रही है।'); return; }
-      if (!officialBridge?.session || !SITE_IDS.every(id => officialBridge.acknowledged[id])) { toast('वेबसाइट टीम के खाते अभी तैयार नहीं हैं। उन्हें जोड़ने के लिए ऊपर टीम खोलें।'); return; }
-      if ([...pendingFiles, ...chat.messages.flatMap(m => m.attachments || [])].some(a => a.kind !== 'text')) { toast('वेबसाइट मोड अभी सिर्फ टेक्स्ट और कोड फ़ाइलें भेज सकता है।'); return; }
-    } else {
-      try { resolveTeam(chat.team, settings.connections); }
-      catch (error) { toast(error.message); return; }
-    }
-  } else if (!direct && !conn(chat.connectionId)) {
-    const d = defaultConn();
-    chat.connectionId = d.id;
-    if (!chat.model) chat.model = d.defaultModel || '';
-  }
-  if (!direct && !chat.team && !chat.model) {
-    toast('AI जवाब के लिए ऊपर मॉडल चुनें।');
-    return;
-  }
+  // A phone already paired to the three websites can use them from ordinary
+  // chat. Existing selected API conversations keep their own route.
+  if (!chat.team && !conn(chat.connectionId) && !defaultConn() && officialBridge) chat.team = { mode: 'website', members: [], coordinator: 2 };
+  const direct = requestRoute(chat, text, pendingFiles);
   input.value = '';
   autosize();
   const attachments = pendingFiles;
@@ -707,8 +748,7 @@ function retry(i) {
   if (chat.team?.mode === 'website' && officialTeamBusy) { toast('वेबसाइट टीम पहले से काम कर रही है।'); return; }
   const message = chat.messages[i - 1];
   if (message?.role !== 'user') return;
-  const direct = directFor(chat, message.content, message.attachments);
-  if (direct?.python?.error) { toast(direct.python.error); return; }
+  const direct = requestRoute(chat, message.content, message.attachments);
   chat.messages.splice(i, 1);
   startAssistant(chat, direct);
 }
@@ -786,6 +826,7 @@ function setOfficialBusy(busy) {
   officialActionBusy = busy;
   $('#officialDialog').querySelectorAll('button:not([data-action="close-dialog"])').forEach(button => { button.disabled = busy; });
   $('#officialScreen').setAttribute('aria-busy', String(busy));
+  if (!busy && pairLink && !officialTeamBusy) queueMicrotask(connectPairLink);
 }
 function refreshOfficialSiteLabel(host = '') {
   const done = !!officialBridge?.acknowledged[officialSite];
@@ -805,24 +846,27 @@ function openOfficialDialog({ reconnect = true } = {}) {
   if (reconnect && officialBridge) connectOfficial();
 }
 async function connectPairLink() {
-  if (!pairLink) return;
-  openOfficialDialog({ reconnect: false });
+  if (!pairLink || officialActionBusy || officialTeamBusy) return;
+  const pairing = pairLink; pairLink = null;
   setOfficialBusy(true);
+  toast('फोन का वेबसाइट कनेक्शन जोड़ रहे हैं…');
   officialStatus('इस फोन को ब्राउज़र सेवा से जोड़ रहे हैं…');
   try {
-    officialBridge = await pairOfficialBridge(pairLink.base, pairLink.code, AbortSignal.timeout(90000));
+    officialBridge = await pairOfficialBridge(pairing.base, pairing.code, AbortSignal.timeout(90000));
     $('#officialUrl').value = officialBridge.base;
     $('#officialToken').value = officialBridge.token;
     $('#officialManage').hidden = false;
     $('#officialManual').open = false;
     $('#officialControls').hidden = false;
     officialStatus('सेवा जुड़ गई। एक वेबसाइट चुनें और लॉगिन करें।');
+    toast('फोन का कनेक्शन सेव हो गया। चैट यहीं जारी रखें।');
     refreshOfficialSiteLabel();
   } catch (e) {
     officialBridge = restoreOfficialBridge();
     $('#officialUrl').value = officialBridge?.base || '';
     $('#officialToken').value = officialBridge?.token || '';
     officialStatus(e.message);
+    toast('वेबसाइट कनेक्शन नहीं जुड़ा। सामान्य चैट खुली है।');
   } finally { setOfficialBusy(false); }
 }
 async function connectOfficial() {
@@ -1864,6 +1908,10 @@ function fitPhoneInDesktopMode() {
 function init() {
   fitPhoneInDesktopMode();
   window.addEventListener('resize', fitPhoneInDesktopMode);
+  window.addEventListener('hashchange', () => {
+    const link = takePairingLink();
+    if (link) { pairLink = link; connectPairLink(); }
+  });
   document.addEventListener('click', onClick);
   document.addEventListener('toggle', e => {
     const d = e.target;

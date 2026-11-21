@@ -6,6 +6,7 @@ const { readFile, stat } = require('node:fs/promises');
 const { existsSync } = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
+const { openTeamSettings } = require('./ui-helpers.cjs');
 const { createBridge } = require('../browser-bridge/server.cjs');
 const { submitPrompt } = require('../browser-bridge/providers.cjs');
 
@@ -70,8 +71,14 @@ async function main() {
     const device = JSON.parse(await page.evaluate(()=>localStorage.getItem('rea.officialBridge.device')));
     assert.ok(device.token.startsWith('rea2.')); assert.notEqual(device.token, token);
     assert.equal((await fetch(bridgeUrl + '/v1/pair',{method:'POST',headers:{origin,'content-type':'application/json'},body:JSON.stringify({code})})).status,401);
-    await page.locator('#officialDialog [data-action="close-dialog"]').click();
-    await page.locator('.welcome [data-action="new-team"]').click();
+    assert.equal(await page.locator('dialog[open]').count(), 0, 'pairing must leave the ordinary chat open');
+    // An old link opened in this tab must neither reopen setup nor erase the
+    // saved phone connection when its one-use code has already expired.
+    await page.evaluate(hash => { location.hash = hash; }, `rea_pair=${code}&bridge=${encodeURIComponent(bridgeUrl)}`);
+    await page.waitForFunction(() => !location.hash && document.querySelector('#toast').textContent.includes('नहीं जुड़ा'));
+    assert.equal(await page.locator('dialog[open]').count(), 0);
+    assert.equal(JSON.parse(await page.evaluate(() => localStorage.getItem('rea.officialBridge.device'))).token, device.token);
+    await openTeamSettings(page);
     await page.locator('#tdMode').selectOption('website');
     await page.locator('#tdTitle').fill('असली वेबसाइट टीम');
     await page.locator('#teamWebsiteHint [data-action="official-browser"]').click();
