@@ -1,0 +1,34 @@
+<section id="animation-studio" aria-labelledby="animation-heading">
+  <h2 id="animation-heading">3D ऐनिमेशन</h2>
+  <div class="media-preview" id="scene-preview" aria-label="ऐनिमेशन का लाइव प्रीव्यू"></div>
+  <div class="media-controls">
+    <label>आकृति <select id="scene-shape"><option value="cube">घन</option><option value="sphere">गोला</option><option value="knot" selected>गाँठ</option><option value="icosahedron">क्रिस्टल</option><option value="torus">छल्ला</option></select></label>
+    <label>रंग <input id="scene-color" type="color" value="#78dfc9"></label>
+    <label>गति <input id="scene-speed" type="range" min="0.2" max="3" step="0.1" value="1"></label>
+  </div>
+  <div class="media-actions">
+    <button type="button" id="scene-play">प्रीव्यू चलाएँ</button>
+    <button type="button" id="scene-record" disabled>वीडियो रिकॉर्ड करें</button>
+    <a id="scene-download" hidden download>ऐनिमेशन डाउनलोड करें</a>
+  </div>
+  <p id="scene-status" role="status"></p>
+</section>
+<section id="video-studio" aria-labelledby="video-heading">
+  <h2 id="video-heading">वीडियो कॉल</h2>
+  <div class="media-videos">
+    <figure><video id="call-local" muted autoplay playsinline></video><figcaption>आप</figcaption></figure>
+    <figure><video id="call-remote" autoplay playsinline></video><figcaption>दूसरा सदस्य</figcaption></figure>
+  </div>
+  <div id="call-setup" class="media-actions">
+    <button type="button" id="call-create">नई कॉल बनाएँ</button>
+    <label>कॉल कोड <input id="call-code" maxlength="16" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="कोड दर्ज करें"></label>
+    <button type="button" id="call-join">कॉल में जुड़ें</button>
+  </div>
+  <div class="media-actions">
+    <button type="button" id="call-end" hidden>कॉल समाप्त करें</button>
+    <button type="button" id="call-record" hidden>कॉल रिकॉर्ड करें</button>
+    <button type="button" id="call-unmute" hidden>दूसरे सदस्य की आवाज़ सुनें</button>
+    <a id="call-download" hidden download>रिकॉर्डिंग डाउनलोड करें</a>
+  </div>
+  <p id="call-status" role="status"></p>
+</section>

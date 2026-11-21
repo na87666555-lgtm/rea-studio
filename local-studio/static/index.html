@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#15171c">
+<title>Rea Studio</title>
+<link rel="icon" href="/static/rea.svg" type="image/svg+xml">
+<link rel="manifest" href="/static/app.webmanifest">
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/media.css">
+</head>
+<body>
+<header class="topbar"><div class="brand"><img src="/static/rea.svg" width="36" height="36" alt=""><strong>Rea</strong><span>Studio</span></div><span class="local"><i></i> लोकल वर्कस्पेस</span></header>
+<div class="layout">
+<nav aria-label="वर्कस्पेस"><button data-tab="chat" aria-current="page">साझा चैट</button><button data-tab="tools">MCP टूल</button><button data-tab="scripts">Python और Blender</button><button data-tab="animation-studio">3D ऐनिमेशन</button><button data-tab="video-studio">वीडियो कॉल</button></nav>
+<main>
+<section id="chat" class="page">
+<h1>साझा चैट</h1>
+<p class="intro">सवाल लिखें या कोई काम कहें। जानकारी वाले सवाल पर Rea सार्वजनिक स्रोत खोजता है और चुने हुए मॉडल मिलकर जवाब देते हैं।</p>
+<details class="card"><summary>मॉडल कनेक्शन और लॉगिन</summary><div id="providers" aria-live="polite">कनेक्शन जाँचे जा रहे हैं…</div></details>
+<form id="chat-form" class="card"><label for="question">आप क्या करना चाहते हैं?</label>
+<textarea id="question" rows="5" maxlength="12000" required placeholder="अपना सवाल या काम लिखें…"></textarea>
+<details><summary>साझा जानकारी संपादित करें</summary><label for="memo">साझा नोट</label><textarea id="memo" rows="3" maxlength="3200"></textarea><button type="button" id="save-note" hidden>नोट सहेजें</button><span id="note-status" role="status"></span><label><input type="checkbox" id="include-memo"> इस सवाल के साथ सभी चुने हुए मॉडलों को नोट भेजें</label></details>
+<button class="primary" id="ask" type="submit">जवाब लें</button></form>
+<div class="card" id="result-panel" hidden><h2>सत्र</h2><p id="activity" role="status"></p><div id="answers"></div></div>
+</section>
+<section id="tools" class="page" hidden><h1>MCP टूल</h1><div class="card"><button id="load-tools">सर्वर से टूल लाएँ</button><p id="tool-status" role="status"></p><form id="tool-form" hidden><label for="tool-name">टूल</label><select id="tool-name"></select><p id="tool-description"></p><details><summary>इनपुट का प्रारूप</summary><pre id="schema"></pre></details><label for="tool-args">आर्ग्युमेंट (JSON)</label><textarea id="tool-args" required rows="4">{}</textarea><button type="submit">टूल चलाएँ</button></form><pre id="tool-result"></pre></div></section>
+<section id="scripts" class="page" hidden><h1>Python और Blender</h1><!--STUDIO--></section>
+<!--MEDIA-->
+</main></div>
+<script defer src="/static/chat_actions.js"></script>
+<script defer src="/static/app.js"></script>
+<script defer src="/static/studio.js"></script>
+<script defer src="/static/media.js"></script>
+</body></html>
