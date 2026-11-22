@@ -1,0 +1,24 @@
+<section id="studio" aria-labelledby="studio-title">
+  <h2 id="studio-title">स्क्रिप्ट स्टूडियो</h2>
+  <p>Python स्क्रिप्ट चलाएँ या Blender से दृश्य रेंडर करें। स्क्रिप्ट को इस डिवाइस पर सर्वर चलाने वाले खाते की अनुमतियाँ मिलेंगी।</p>
+  <form id="studio-form">
+    <label for="studio-engine">इंजन</label>
+    <select id="studio-engine">
+      <option value="python">Python</option>
+      <option value="blender">Blender</option>
+    </select>
+    <p id="studio-availability" role="status"></p>
+    <details id="studio-install-details" hidden>
+      <summary>Termux में Blender इंस्टॉल करें</summary>
+      <p>यह अलग Debian वातावरण और Blender डाउनलोड करके इसी डिवाइस पर इंस्टॉल करेगा। इसके लिए इंटरनेट, पर्याप्त स्टोरेज और चालू Termux सर्वर चाहिए। डाउनलोड के दौरान नीचे लॉग दिखेगा।</p>
+      <button type="button" id="studio-install">डाउनलोड और इंस्टॉल करें</button>
+    </details>
+    <label for="studio-script">स्क्रिप्ट</label>
+    <textarea id="studio-script" rows="12" spellcheck="false" dir="ltr" required></textarea>
+    <p>प्रीव्यू और डाउनलोड के लिए इसी फ़ोल्डर में <code>output.png</code> या <code>output.mp4</code> सहेजें। हर फ़ाइल की सीमा 32 MB है।</p>
+    <button type="submit" id="studio-run">स्क्रिप्ट चलाएँ</button>
+  </form>
+  <p role="status" id="studio-state"></p>
+  <pre id="studio-log" dir="auto" hidden></pre>
+  <div id="studio-results"></div>
+</section>

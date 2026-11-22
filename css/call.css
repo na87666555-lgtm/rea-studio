@@ -1,0 +1,17 @@
+.call-shell { max-width: 940px; margin: 0 auto; padding: clamp(16px, 4vw, 44px); }
+.call-shell nav a { display: inline-flex; align-items: center; gap: .6rem; color: var(--text); text-decoration: none; }
+.call-shell h1 { font-size: clamp(1.8rem, 4vw, 2.6rem); margin: 1rem 0; }
+.call-stage { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; }
+.call-stage figure { position: relative; margin: 0; overflow: hidden; border-radius: var(--radius); background: #17152a; }
+.call-stage video { width: 100%; height: auto; display: block; aspect-ratio: 4 / 3; object-fit: contain; }
+.call-stage figcaption { position: absolute; bottom: 8px; left: 8px; padding: .1rem .6rem; border-radius: 8px; color: white; background: rgb(0 0 0 / .68); }
+.call-shell #status { min-height: 1.5em; }
+.call-panel { padding: 16px; margin: 0 0 16px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
+.call-panel summary { cursor: pointer; color: var(--accent); }
+.call-panel details, #reply-area { margin-top: .9rem; }
+.call-panel label { display: block; margin-top: .55rem; }
+.call-panel textarea { display: block; width: 100%; resize: vertical; margin: .4rem 0 .8rem; padding: .55rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; font: .85rem var(--mono); }
+.call-actions { display: flex; flex-wrap: wrap; gap: .6rem; }
+.call-actions a { text-decoration: none; }
+.call-help { color: var(--muted); font-size: .9rem; }
+#their-recording { color: var(--warn); }

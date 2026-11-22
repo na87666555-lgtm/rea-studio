@@ -1,0 +1,13 @@
+.media-preview, .media-videos figure { overflow: hidden; border-radius: 14px; background: #13242b; color: #fff; }
+.media-preview { aspect-ratio: 16/9; width: 100%; }
+.media-preview canvas { display: block; width: 100%; height: 100%; }
+.media-controls, .media-actions { display: flex; align-items: end; flex-wrap: wrap; gap: .9rem; margin: 1rem 0; }
+.media-controls label, .media-actions label { display: grid; gap: .35rem; }
+.media-controls input[type=color] { width: 3.4rem; min-height: 2.5rem; }
+.media-videos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; }
+.media-videos figure { position: relative; margin: 0; aspect-ratio: 4/3; }
+.media-videos video { display: block; width: 100%; height: 100%; object-fit: contain; }
+.media-videos figcaption { position: absolute; bottom: .45rem; left: .45rem; border-radius: .3rem; padding: .15rem .45rem; background: #13242bcc; color: white; font-size: .8rem; }
+#call-code { max-width: 11rem; }
+#scene-status, #call-status { white-space: pre-wrap; overflow-wrap: anywhere; }
+.media-actions [hidden], #call-setup[hidden] { display: none !important; }

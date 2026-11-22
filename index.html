@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="hi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src *; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#14122b">
+  <meta name="description" content="Rea Studio में सार्वजनिक स्रोत पढ़ें, 3D ऐनिमेशन बनाएँ और अपने जुड़े AI मॉडलों के साथ चैट करें।">
+  <title>Rea Studio</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/app.css?ui=5">
+  <link rel="stylesheet" href="css/animation.css">
+  <script type="module" src="js/animation.js"></script>
+  <script type="module" src="js/app.js?ui=8"></script>
+</head>
+<body>
+  <div id="app">
+    <aside id="drawer" class="drawer" aria-label="चैट सूची">
+      <div class="drawer-head">
+        <div class="brand"><img src="icons/icon.svg" alt="" width="30" height="30"><span>Rea Studio</span></div>
+        <button type="button" class="icon-btn only-mobile" data-action="close-drawer" aria-label="बंद करें">✕</button>
+      </div>
+      <div class="drawer-buttons">
+        <button type="button" class="btn primary block" data-action="new-chat">+ नई चैट</button>
+        <button type="button" class="btn block" id="openAnimation">◈ 3D ऐनिमेशन</button>
+        <a class="btn block call-link" href="call.html">वीडियो कॉल</a>
+        <details class="drawer-options"><summary>और विकल्प</summary>
+        <button type="button" class="btn block" data-action="new-team">टीम की सेटिंग</button>
+        <button type="button" class="btn block" data-action="official-browser">वेबसाइट खाते जोड़ें</button>
+        <button type="button" class="btn block" data-action="show-multi">⚡ एक साथ कई काम</button>
+        <button type="button" class="btn block" data-action="show-settings">⚙ API और सेटिंग्स</button>
+        <button type="button" class="btn block install-btn" data-action="install" hidden>📲 ऐप इंस्टॉल करें</button>
+        </details>
+      </div>
+      <div class="drawer-label">चैट</div>
+      <ul id="chatList" class="chat-list"></ul>
+      <footer class="release-footer"><button type="button" id="checkUpdate" class="btn small">अपडेट जाँचें</button><span id="updateStatus" role="status"></span></footer>
+    </aside>
+    <div id="scrim" class="scrim" data-action="close-drawer" hidden></div>
+
+    <main class="main">
+      <header class="topbar">
+        <button type="button" class="icon-btn only-mobile" data-action="open-drawer" aria-label="मेनू">☰</button>
+        <button type="button" id="backBtn" class="icon-btn" data-action="show-chat" aria-label="वापस" hidden>←</button>
+        <div class="topbar-title" id="topTitle">Rea Studio</div>
+        <button type="button" id="projectBtn" class="chip" data-action="open-project" hidden>⌘ कोड</button>
+        <button type="button" id="modelChip" class="chip" data-action="open-model">मॉडल चुनें</button>
+      </header>
+
+      <section id="chatView" class="view chat-view">
+        <div id="messages" class="messages" aria-live="polite"></div>
+        <form id="composer" class="composer">
+          <div id="attachRow" class="attach-row" hidden></div>
+          <div class="composer-row">
+            <button type="button" class="attach-btn" data-action="attach" aria-label="फ़ोटो या फ़ाइल जोड़ें">＋</button>
+            <textarea id="input" rows="1" placeholder="संदेश लिखें…" enterkeyhint="enter" aria-label="संदेश"></textarea>
+            <button id="sendBtn" class="send-btn" type="submit" aria-label="भेजें">➤</button>
+          </div>
+          <input type="file" id="fileInput" multiple hidden>
+        </form>
+      </section>
+
+      <section id="settingsView" class="view panel" hidden></section>
+      <section id="multiView" class="view panel" hidden></section>
+    </main>
+  </div>
+
+  <dialog id="animationDialog" class="dlg" aria-labelledby="animationTitle">
+    <div class="animation-content">
+      <header class="animation-header">
+        <h2 id="animationTitle">3D ऐनिमेशन</h2>
+        <button type="button" class="icon-btn" id="animationClose" aria-label="स्टूडियो बंद करें">✕</button>
+      </header>
+      <div id="animationPreview" role="img" aria-label="घूमती 3D आकृति का प्रीव्यू"></div>
+      <div class="animation-controls">
+        <label>आकृति<select id="animationShape"><option value="knot">गाँठ</option><option value="cube">घन</option><option value="sphere">गोला</option><option value="icosahedron">क्रिस्टल</option><option value="torus">छल्ला</option></select></label>
+        <label>रंग<input id="animationColor" type="color" value="#78dfc9"></label>
+        <label>गति<input id="animationSpeed" type="range" min="0.2" max="3" step="0.1" value="1"></label>
+      </div>
+      <div class="animation-buttons">
+        <button type="button" class="btn" id="animationPlay" disabled>चलाएँ</button>
+        <button type="button" class="btn primary" id="animationRecord" disabled>वीडियो रिकॉर्ड करें</button>
+        <a class="btn" id="animationDownload" download hidden>वीडियो डाउनलोड करें</a>
+      </div>
+      <p id="animationStatus" class="hint" role="status"></p>
+    </div>
+  </dialog>
+
+  <dialog id="teamDialog" class="dlg team-dialog">
+    <form id="teamForm">
+      <h2>✦ तीन AI · एक प्रोजेक्ट</h2>
+      <label>तीनों से कैसे जुड़ें<select id="tdMode"><option value="api">मौजूदा API कनेक्शन से</option><option value="website">मेरे वेबसाइट खातों से (प्रायोगिक)</option></select></label>
+      <p id="teamApiHint" class="hint">टीम आपके सहेजे हुए कनेक्शन इस्तेमाल करेगी।</p>
+      <div id="teamWebsiteHint" hidden><p class="hint" id="teamBridgeHint"></p><button type="button" class="btn" data-action="official-browser">वेबसाइट कनेक्शन खोलें</button></div>
+      <label>प्रोजेक्ट का नाम<input id="tdTitle" maxlength="100" placeholder="साझा प्रोजेक्ट (वैकल्पिक)"></label>
+      <details class="setup-options" id="teamOptions">
+        <summary>मॉडल और निर्देश बदलें</summary>
+        <div id="teamApiFields">
+          <div id="teamMembers"></div>
+          <button type="button" class="btn small" data-action="team-add-api">+ API कनेक्शन जोड़ें</button>
+        </div>
+        <label>साझा जवाब तैयार करे<select id="tdCoordinator"><option value="0">ChatGPT</option><option value="1">Gemini</option><option value="2" selected>Claude</option></select></label>
+        <label>साझा निर्देश<textarea id="tdSystem" rows="3" placeholder="तीनों को क्या ध्यान रखना चाहिए?"></textarea></label>
+      </details>
+      <p id="tdStatus" class="hint" role="status"></p>
+      <div class="dlg-actions">
+        <button type="button" class="btn" data-action="close-dialog">रद्द</button>
+        <button type="submit" class="btn primary">टीम सेव करें</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="officialDialog" class="dlg official-dialog">
+    <div class="project-header"><h2>🌐 वेबसाइट लॉगिन</h2><button type="button" class="btn small" data-action="close-dialog">बंद करें</button></div>
+    <p id="officialStatus" class="hint" role="status"></p>
+    <button type="button" class="btn primary" data-action="resume-chat">चैट पर लौटें</button>
+    <details class="setup-options" id="officialManual">
+      <summary>ब्राउज़र सेवा की सेटिंग</summary>
+      <p class="hint">अपनी निजी Rea ब्राउज़र सेवा का पता और उसी का पासकोड डालें। सेवा आपकी लॉगिन स्क्रीन देख सकती है। यहाँ Google, ChatGPT या Claude का पासवर्ड न डालें।</p>
+      <label>सेवा का HTTPS पता<input id="officialUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://…"></label>
+      <label>सेवा का पासकोड<input id="officialToken" type="password" autocomplete="off" spellcheck="false"></label>
+      <button type="button" class="btn" data-action="official-connect">सेवा जोड़ें</button>
+      <div class="row wrap" id="officialManage" hidden><button type="button" class="btn" data-action="official-close-session">सत्र बंद करें</button><button type="button" class="btn danger" data-action="official-forget">फ़ोन का कनेक्शन हटाएँ</button></div>
+    </details>
+    <div id="officialControls" hidden>
+      <p class="hint">फ़ोन का कनेक्शन सेव है; इसकी 10 मिनट की सीमा नहीं है। नीचे वेबसाइट की स्क्रीन पर अपनी ID से लॉगिन करें। फोन में पहले से खुला खाता यहाँ अपने-आप नहीं आता।</p>
+      <div class="row wrap"><button type="button" class="btn small" data-action="official-site" data-site="chatgpt">ChatGPT</button><button type="button" class="btn small" data-action="official-site" data-site="gemini">Gemini</button><button type="button" class="btn small" data-action="official-site" data-site="claude">Claude</button></div>
+      <p id="officialSite" class="hint"></p>
+      <div class="row wrap"><button type="button" class="btn primary" data-action="official-login">लॉगिन पेज खोलें</button><button type="button" class="btn" data-action="official-reconnect" id="officialReconnect" hidden>सेव कनेक्शन से फिर जुड़ें</button></div>
+      <p id="officialPreviewStatus" class="hint" role="status" hidden></p>
+      <p id="officialPhoneOption" class="hint" hidden><a id="officialPhoneLogin" href="https://chatgpt.com/auth/login" target="_blank" rel="noopener noreferrer">फ़ोन के ब्राउज़र में लॉगिन खोलें</a> · वहाँ किया गया लॉगिन Rea की टीम से अलग रहेगा।</p>
+      <img id="officialScreen" class="official-screen" hidden alt="चुनी वेबसाइट की स्क्रीन; टैप या स्वाइप करके नियंत्रण करें">
+      <div class="row wrap"><button type="button" class="btn small" data-action="official-refresh">↻ स्क्रीन ताज़ा</button><button type="button" class="btn small" data-action="official-up">↑ ऊपर</button><button type="button" class="btn small" data-action="official-down">↓ नीचे</button><button type="button" class="btn small" data-action="official-enter">↵ Enter</button><button type="button" class="btn small" data-action="official-backspace">⌫</button><button type="button" class="btn small" data-action="official-select-all">सब चुनें</button><button type="button" class="btn small" data-action="official-tab">Tab</button></div>
+      <label>चुनी हुई जगह पर लिखें <input id="officialText" type="password" autocomplete="off" spellcheck="false" placeholder="ईमेल, पासवर्ड या अन्य टेक्स्ट"></label>
+      <div class="row wrap"><button type="button" class="btn small" data-action="official-type">टेक्स्ट भेजें</button><button type="button" class="btn small" data-action="official-toggle">टेक्स्ट दिखाएँ</button><button type="button" class="btn small" data-action="official-reset">वेबसाइट फिर खोलें</button></div>
+      <button type="button" class="btn primary" data-action="official-ack" disabled>मेरे खाते की जाँच करें</button>
+      <p class="hint">लॉगिन के बाद जाँच करें। बटन दबाने से लॉगिन नहीं होता। प्रीमियम प्लान वेबसाइट पर अपने खाते में देखें। सेवा दोबारा शुरू होने या वेबसाइट का सत्र समाप्त होने पर फिर लॉगिन करना पड़ सकता है; फ़ोन का कनेक्शन सेव रहता है।</p>
+    </div>
+  </dialog>
+
+  <dialog id="projectDialog" class="dlg project-dialog">
+    <div class="project-header"><h2>⌘ प्रोजेक्ट कोड</h2><button type="button" class="btn small" data-action="close-dialog">बंद करें</button></div>
+    <p class="hint">यह प्रोजेक्ट इसी चैट में सेव होता है। index.html, style.css और script.js का प्रीव्यू नीचे देख सकते हैं।</p>
+    <label>मौजूदा फ़ाइल<select id="projectSelect"><option value="">नई फ़ाइल</option></select></label>
+    <label>फ़ाइल का नाम<input id="projectPath" placeholder="index.html" autocomplete="off" spellcheck="false"></label>
+    <label>कोड<textarea id="projectContent" class="project-editor" rows="12" spellcheck="false" placeholder="फ़ाइल का कोड यहाँ लिखें…"></textarea></label>
+    <div class="row wrap"><button type="button" class="btn primary" data-action="project-save">फ़ाइल सेव करें</button><button type="button" class="btn" data-action="project-refresh">फ़ाइल लिस्ट ताज़ा करें</button><button type="button" class="btn" data-action="project-preview">▶ प्रीव्यू चलाएँ</button><button type="button" class="btn" data-action="project-download">⬇ फ़ाइल डाउनलोड</button><button type="button" class="btn danger" data-action="project-delete">फ़ाइल हटाएँ</button></div>
+    <p id="projectStatus" class="hint" role="status"></p>
+    <iframe id="projectPreview" title="प्रोजेक्ट प्रीव्यू" class="project-preview" sandbox="allow-scripts" hidden></iframe>
+  </dialog>
+
+  <dialog id="modelDialog" class="dlg">
+    <form id="modelForm">
+      <h2>मॉडल चुनें</h2>
+      <label>API कनेक्शन
+        <select id="mdConn"></select>
+      </label>
+      <label>मॉडल
+        <input id="mdModel" list="mdModelList" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="मॉडल का नाम">
+        <datalist id="mdModelList"></datalist>
+      </label>
+      <button type="button" class="btn small" data-action="md-fetch">↻ मॉडल लिस्ट लाओ</button>
+      <div id="mdStatus" class="hint"></div>
+      <div id="mdModels" class="model-pills"></div>
+      <label>इस चैट के लिए खास निर्देश (वैकल्पिक)
+        <textarea id="mdSystem" rows="3" placeholder="जैसे: तुम एक हिंदी शिक्षक हो।"></textarea>
+      </label>
+      <div class="dlg-actions">
+        <button type="button" class="btn" data-action="close-dialog">रद्द</button>
+        <button type="submit" class="btn primary">सेव</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="connDialog" class="dlg">
+    <form id="connForm">
+      <h2 id="cdTitle">नया API जोड़ें</h2>
+      <label id="cdPresetWrap">Provider
+        <select id="cdPreset"></select>
+      </label>
+      <p id="cdHint" class="hint"></p>
+      <label>नाम
+        <input id="cdName" autocomplete="off" required>
+      </label>
+      <label>API का प्रकार
+        <select id="cdFormat">
+          <option value="openai">OpenAI-जैसा (chat/completions)</option>
+          <option value="anthropic">Anthropic-जैसा (messages)</option>
+        </select>
+      </label>
+      <label>Base URL
+        <input id="cdBase" inputmode="url" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="https://…" required>
+      </label>
+      <label>API Key
+        <span class="key-row">
+          <input id="cdKey" type="password" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="अपनी key यहाँ डालें">
+          <button type="button" class="btn small" data-action="cd-toggle-key">दिखाएँ</button>
+        </span>
+      </label>
+      <label>डिफ़ॉल्ट मॉडल
+        <input id="cdModel" list="cdModelList" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="मॉडल का नाम">
+        <datalist id="cdModelList"></datalist>
+      </label>
+      <div class="row wrap">
+        <button type="button" class="btn small" data-action="cd-fetch">↻ मॉडल लिस्ट लाओ</button>
+        <button type="button" class="btn small" data-action="cd-test">✓ टेस्ट करें</button>
+      </div>
+      <div id="cdStatus" class="hint"></div>
+      <div id="cdModels" class="model-pills"></div>
+      <details>
+        <summary>उन्नत सेटिंग्स</summary>
+        <label>एक साथ कितनी requests (1–20)
+          <input id="cdParallel" type="number" min="1" max="20" inputmode="numeric">
+        </label>
+        <label>Max tokens (जवाब की अधिकतम लंबाई; खाली छोड़ें तो डिफ़ॉल्ट)
+          <input id="cdMaxTokens" type="number" min="1" inputmode="numeric">
+        </label>
+        <label id="cdVersionWrap">anthropic-version
+          <input id="cdVersion" autocomplete="off" spellcheck="false" autocapitalize="off">
+        </label>
+      </details>
+      <div class="dlg-actions">
+        <button type="button" class="btn" data-action="close-dialog">रद्द</button>
+        <button type="submit" class="btn primary">सेव</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="installDialog" class="dlg">
+    <form id="installForm">
+      <h2>📲 फ़ोन पर ऐप इंस्टॉल करें</h2>
+      <p class="hint">आपका ब्राउज़र सीधा इंस्टॉल बटन नहीं दे रहा, इसलिए ये 3 आसान कदम करें:</p>
+      <div id="installAndroid" class="install-steps">
+        <h3>Android (Chrome)</h3>
+        <ol>
+          <li>यह पेज <strong>Chrome</strong> में खुला होना चाहिए। अगर WhatsApp या किसी दूसरे ऐप के अंदर खुला है, तो ⋮ दबाकर <strong>"Chrome में खोलें"</strong> चुनें, या नीचे से लिंक कॉपी करके Chrome में खोलें।</li>
+          <li>ऊपर दाईं ओर <strong>⋮</strong> (तीन बिंदु) दबाएँ।</li>
+          <li><strong>"ऐप इंस्टॉल करें / Install app"</strong> या <strong>"होम स्क्रीन पर जोड़ें"</strong> दबाएँ, फिर <strong>इंस्टॉल</strong>।</li>
+        </ol>
+      </div>
+      <div id="installIos" class="install-steps">
+        <h3>iPhone (Safari)</h3>
+        <ol>
+          <li>यह पेज <strong>Safari</strong> में खोलें।</li>
+          <li>नीचे <strong>Share</strong> बटन (⬆️ वाला चौकोर) दबाएँ।</li>
+          <li><strong>"Add to Home Screen"</strong> → <strong>Add</strong> दबाएँ।</li>
+        </ol>
+      </div>
+      <button type="button" class="btn small" data-action="copy-link">🔗 ऐप का लिंक कॉपी करें</button>
+      <div class="dlg-actions">
+        <button type="button" class="btn primary" data-action="close-dialog">ठीक है</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>

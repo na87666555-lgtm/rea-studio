@@ -1,0 +1,157 @@
+// Real phone UI -> real bridge -> real Chromium. Website pages are fixtures;
+// no personal account or provider traffic is used in this test.
+const { chromium } = require('playwright');
+const { createServer } = require('node:http');
+const { readFile, stat } = require('node:fs/promises');
+const { existsSync } = require('node:fs');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+const { openTeamSettings } = require('./ui-helpers.cjs');
+const { createBridge } = require('../browser-bridge/server.cjs');
+const { submitPrompt } = require('../browser-bridge/providers.cjs');
+
+function fixture(site) {
+  const editor = site === 'chatgpt' ? '<textarea id="prompt-textarea"></textarea>' : site === 'gemini'
+    ? '<div role="textbox" contenteditable="true"></div>' : '<div class="ProseMirror" contenteditable="true"></div>';
+  const button = site === 'gemini' ? '<button class="send-button">Send</button>' : '<button data-testid="send-button">Send</button>';
+  return `<!doctype html><html><head><meta charset="utf-8"><style>textarea,[contenteditable]{display:block;width:350px;height:60px;border:1px solid black}button{margin:10px}</style></head><body>
+  <h2>${site}</h2>${editor}${button}<div id="answers"></div><script>
+  document.querySelector('button').onclick=()=>{
+    const el=document.querySelector('textarea,[contenteditable]'); const text=el.value || el.innerText;
+    let result;
+    if(text.includes('ONE useful final answer')) result='एक साझा वेबसाइट जवाब';
+    else if('${site}'==='chatgpt') result=text.includes('SHARED_FILE_TOKEN')?'योजना: PLAN_TOKEN':'missing attachment';
+    else if('${site}'==='gemini') result=text.includes('PLAN_TOKEN')?JSON.stringify({answer:'बनाया BUILD_TOKEN',files:[{path:'index.html',content:'<h1>BRIDGE_CODE_TOKEN</h1>'}]}):'missing plan';
+    else result=JSON.stringify({answer:text.includes('BRIDGE_CODE_TOKEN')?'जाँच सफल':'missing file',files:[]});
+    const box=document.createElement('${site === 'gemini' ? 'model-response' : 'div'}');
+    ${site === 'chatgpt' ? "box.dataset.messageAuthorRole='assistant';" : site === 'claude' ? "box.dataset.testid='assistant-message';" : ''}
+    box.innerText=result; document.querySelector('#answers').append(box); el.value=''; el.innerText='';
+  };</script></body></html>`;
+}
+
+async function main() {
+  const root = path.resolve(__dirname, '..');
+  const types = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css', '.json':'application/json', '.svg':'image/svg+xml', '.png':'image/png', '.webmanifest':'application/manifest+json' };
+  const frontend = createServer(async (req,res) => { try {
+    const n=decodeURIComponent(new URL(req.url,'http://local').pathname); const f=path.resolve(root,'.'+(n==='/'?'/index.html':n));
+    if(!f.startsWith(root+'/') || !(await stat(f)).isFile()) return res.writeHead(404).end();
+    res.setHeader('content-type',types[path.extname(f)]||'text/plain'); res.end(await readFile(f));
+  } catch {res.writeHead(404).end();} });
+  await new Promise(r=>frontend.listen(0,'127.0.0.1',r));
+  const origin=`http://127.0.0.1:${frontend.address().port}`;
+  const executablePath=process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||(existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined);
+  const bridgeBrowser=await chromium.launch({headless:true,executablePath,args:['--no-sandbox']});
+  let lastBridgePage, bridgeContext;
+  const launch=async()=>({
+    newContext:async options=>{
+      const context=await bridgeBrowser.newContext(options); bridgeContext=context; context.on('page',p=>{lastBridgePage=p;});
+      const original=context.route.bind(context);
+      context.route=async (pattern,handler)=>{
+        await original(pattern,handler);
+        for(const [url,site] of [['https://chatgpt.com/**','chatgpt'],['https://gemini.google.com/**','gemini'],['https://claude.ai/**','claude']]) {
+          await original(url,r=>r.fulfill({status:200,contentType:'text/html',body:fixture(site)}));
+        }
+      };
+      return context;
+    }, close:async()=>bridgeBrowser.close(),
+  });
+  const token='test-only-browser-service-key-1234567890';
+  const bridge=createBridge({token,origin,launch,sendPrompt:(page,svc,prompt,opts)=>submitPrompt(page,svc,prompt,{...opts,timeoutMs:6000,settleMs:100,pollMs:25})});
+  await new Promise(r=>bridge.listen(0,'127.0.0.1',r));
+  const bridgeUrl=`http://127.0.0.1:${bridge.address().port}`;
+  const browser=await chromium.launch({headless:true,executablePath,args:['--no-sandbox']});
+  try {
+    const codeResponse = await fetch(bridgeUrl + '/v1/pair-code', { method:'POST', headers:{ origin, authorization:`Bearer ${token}`, 'content-type':'application/json' }, body:'{}' });
+    assert.equal(codeResponse.status, 200); const { code } = await codeResponse.json();
+    const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
+    const page=await context.newPage(); const errors=[]; page.on('pageerror',e=>errors.push(e.message));
+    await page.goto(`${origin}/#rea_pair=${code}&bridge=${encodeURIComponent(bridgeUrl)}`);
+    await page.waitForFunction(()=>!document.querySelector('#officialControls').hidden);
+    assert.equal(new URL(page.url()).hash,'');
+    const device = JSON.parse(await page.evaluate(()=>localStorage.getItem('rea.officialBridge.device')));
+    assert.ok(device.token.startsWith('rea2.')); assert.notEqual(device.token, token);
+    assert.equal((await fetch(bridgeUrl + '/v1/pair',{method:'POST',headers:{origin,'content-type':'application/json'},body:JSON.stringify({code})})).status,401);
+    assert.equal(await page.locator('dialog[open]').count(), 0, 'pairing must leave the ordinary chat open');
+    // An old link opened in this tab must neither reopen setup nor erase the
+    // saved phone connection when its one-use code has already expired.
+    await page.evaluate(hash => { location.hash = hash; }, `rea_pair=${code}&bridge=${encodeURIComponent(bridgeUrl)}`);
+    await page.waitForFunction(() => !location.hash && document.querySelector('#toast').textContent.includes('नहीं जुड़ा'));
+    assert.equal(await page.locator('dialog[open]').count(), 0);
+    assert.equal(JSON.parse(await page.evaluate(() => localStorage.getItem('rea.officialBridge.device'))).token, device.token);
+    await openTeamSettings(page);
+    await page.locator('#tdMode').selectOption('website');
+    await page.locator('#tdTitle').fill('असली वेबसाइट टीम');
+    await page.locator('#teamWebsiteHint [data-action="official-browser"]').click();
+    await page.waitForFunction(()=>!document.querySelector('#officialControls').hidden);
+    await page.waitForFunction(()=>!document.querySelector('#officialScreen').hidden && document.querySelector('#officialScreen').naturalWidth > 0);
+    assert.equal(await page.locator('#officialToken').inputValue(),'');
+    await page.locator('[data-action="official-ack"]').click();
+    await page.waitForFunction(()=>document.querySelector('#officialStatus').textContent.includes('खाते का लॉगिन नहीं मिला'));
+    assert.ok((await page.locator('#officialSite').innerText()).includes('जाँच बाकी'));
+    // These cookies are test fixtures, never real provider credentials.
+    await bridgeContext.addCookies([
+      { name:'__Secure-next-auth.session-token', value:'fixture-only', url:'https://chatgpt.com', secure:true },
+      { name:'__Secure-1PSID', value:'fixture-only', url:'https://gemini.google.com', secure:true },
+      { name:'sessionKey', value:'fixture-only', url:'https://claude.ai', secure:true },
+    ]);
+    for(const [id,host] of [['chatgpt','chatgpt.com'],['gemini','gemini.google.com'],['claude','claude.ai']]) {
+      await page.locator(`[data-action="official-site"][data-site="${id}"]`).click();
+      await page.waitForFunction(h=>document.querySelector('#officialSite').textContent.includes(h),host);
+      if(id==='chatgpt') {
+        await page.locator('#officialScreen').click({position:{x:50,y:80}});
+        await page.locator('#officialText').fill('screen-input-test');
+        await page.locator('[data-action="official-type"]').click();
+        await page.waitForFunction(()=>!document.querySelector('#officialText').value);
+        assert.equal(await lastBridgePage.locator('#prompt-textarea').inputValue(),'screen-input-test');
+      }
+      await page.locator('[data-action="official-ack"]').click();
+      await page.waitForFunction(()=>document.querySelector('#officialSite').textContent.includes('खाते का सत्र और चैट मिले'));
+    }
+    await page.locator('#officialDialog [data-action="close-dialog"]').click();
+    await page.locator('#teamForm [type="submit"]').click();
+    await page.locator('#fileInput').setInputFiles({ name:'brief.txt', mimeType:'text/plain', buffer:Buffer.from('SHARED_FILE_TOKEN') });
+    await page.waitForFunction(()=>!document.querySelector('.att-chip .tool-spin'));
+    await page.locator('#input').fill('एक छोटा पेज बनाओ'); await page.locator('#sendBtn').click();
+    await page.waitForFunction(()=>document.querySelector('.team-status')?.textContent.includes('साझा जवाब तैयार'),null,{timeout:20000});
+    await page.waitForFunction(()=>document.querySelector('.msg.assistant > .content')?.textContent.includes('एक साझा वेबसाइट जवाब'),null,{timeout:10000});
+    await page.waitForFunction(()=>!document.querySelector('#sendBtn').classList.contains('stop'));
+    await page.locator('#projectBtn').click(); assert.equal(await page.locator('#projectPath').inputValue(),'index.html');
+    assert.ok((await page.locator('#projectContent').inputValue()).includes('BRIDGE_CODE_TOKEN'));
+    const oldSession = JSON.parse(await page.evaluate(()=>sessionStorage.getItem('rea.officialBridge.session'))).session;
+    // Losing the provider session after a successful check must block the next
+    // prompt as well; a saved boolean is never a substitute for the account.
+    await bridgeContext.clearCookies();
+    const expired = await fetch(bridgeUrl + '/v1/prompt', { method:'POST', headers:{origin,authorization:`Bearer ${token}`,'content-type':'application/json','x-rea-session':oldSession}, body:JSON.stringify({service:'chatgpt',prompt:'Do not send without an account'}) });
+    assert.equal(expired.status, 422);
+    assert.match((await expired.json()).error, /खाते का लॉगिन नहीं मिला/);
+    // Simulate an idle host losing its provider browser without removing the
+    // phone's pairing. The next user visit must reconnect without a new link.
+    assert.equal((await fetch(bridgeUrl+'/v1/close',{method:'POST',headers:{origin,authorization:`Bearer ${token}`,'content-type':'application/json','x-rea-session':oldSession},body:'{}'})).status,200);
+    const secondPage=await context.newPage();
+    const startupCalls=[];
+    secondPage.on('request',r=>{if(r.url().startsWith(bridgeUrl)) startupCalls.push(r.url());});
+    await secondPage.goto(origin);
+    assert.equal(startupCalls.length,0,'opening the app alone must not wake the free browser host');
+    await secondPage.goto(origin+'/#accounts');
+    await secondPage.locator('#officialDialog[open]').waitFor();
+    await secondPage.waitForFunction(()=>!document.querySelector('#officialControls').hidden);
+    assert.equal(await secondPage.locator('#officialToken').inputValue(),'');
+    assert.notEqual(JSON.parse(await secondPage.evaluate(()=>sessionStorage.getItem('rea.officialBridge.session'))).session,oldSession);
+    assert.ok((await secondPage.locator('#officialSite').innerText()).includes('जाँच बाकी'));
+    await secondPage.waitForFunction(()=>!document.querySelector('#officialScreen').hidden && document.querySelector('#officialScreen').naturalWidth > 0);
+    await secondPage.locator('#officialManual summary').click();
+    await secondPage.locator('[data-action="official-close-session"]').click();
+    await secondPage.waitForFunction(()=>document.querySelector('#officialControls').hidden);
+    assert.equal(JSON.parse(await secondPage.evaluate(()=>localStorage.getItem('rea.officialBridge.device'))).token,device.token);
+    await secondPage.locator('[data-action="official-forget"]').click();
+    await secondPage.waitForFunction(()=>!localStorage.getItem('rea.officialBridge.device'));
+    await secondPage.close();
+    assert.deepEqual(errors,[]);
+    console.log('PASS: one-use phone pairing -> authenticated bridge -> three fixture sites -> code handoff -> one result. Provider logins are not simulated as real.');
+    await context.close();
+  } finally {
+    await browser.close(); await new Promise(r=>bridge.close(r)); await new Promise(r=>frontend.close(r));
+    await bridgeBrowser.close().catch(()=>{});
+  }
+}
+main().catch(e=>{console.error(e);process.exitCode=1;});

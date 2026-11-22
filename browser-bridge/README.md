@@ -1,0 +1,57 @@
+# Rea Studio website browser bridge (experimental)
+
+This optional, single-user service runs an isolated Chromium session for the Rea Studio website-login mode. The user controls the actual pages of ChatGPT, Google Gemini, and Claude from the phone and performs their own sign-ins. It is separate from the existing API mode and does not receive the user's Coarena or other model API keys.
+
+**Status:** the phone-to-browser flow and model handoff have been tested against local fixture sites. The actual public ChatGPT and Gemini websites have returned guest-mode test answers, and all three public login pages opened in a local browser. Authenticated ChatGPT, Gemini, and Claude accounts have not been tested. Provider login restrictions, CAPTCHA, product UI changes, account policies, and answer selectors may prevent the feature working. The bridge reports these failures; it does not bypass a login challenge or substitute another model.
+
+## Privacy and lifetime
+
+- This browser runs on the machine hosting this service, not in the phone's own Chrome. The service operator and hosting platform can potentially access its memory, browser screen, cookies, and credentials typed into it. Host it only in a service you trust; use a dedicated high-entropy token and HTTPS.
+- The app sends the screenshots and user interactions through the bridge. Conversation messages, project instructions, and relevant code are sent to the selected official websites. They may be retained according to those services' account settings.
+- This implementation has one user/session per service token and closes it after 20 minutes of inactivity. Restart, deploy, or hosting sleep ends that session. The app does not export cookies to disk, but Chromium and the host may use temporary runtime files. You may need to sign in again.
+- To keep memory lower, only one provider page is kept open at a time. Switching sites closes the other page, keeps the browser context and cookies, and tries to restore its last conversation. Some sites keep session data per tab or use popups, so this may require signing in again.
+- Requests and WebSockets in the browser are restricted to an allowlist of provider, login, and verification domains. This helps reduce unintended access, but can prevent some legitimate provider assets or login methods from loading. The bridge offers no arbitrary URL, shell, or code-execution endpoint.
+- API keys and the service administrator token must never be committed. A manually entered administrator token stays in the current tab's session storage. A single-use pairing link instead saves a separate device token on the phone, with no scheduled expiry. Valid old seven-day credentials upgrade on reconnect; already expired ones require a new pairing link. Closing the website session keeps the phone paired. Removing the phone connection or clearing browser data removes the saved credential; rotating the service administrator token revokes all issued device credentials, including copied ones. Never paste login passwords or service tokens into chat messages.
+- Open “वेबसाइट लॉगिन” to reconnect a saved phone. The app does not wake the bridge on ordinary startup or send keepalive requests. A sleeping/restarted host can lose website cookies and require new provider logins even though phone pairing remains valid. Pairing does not guarantee free hosting, permanent login or website compatibility.
+
+## Running locally
+
+Node.js 20+ and a Playwright Chromium installation are required. Set `REA_BRIDGE_TOKEN` to a unique, random secret at least 32 characters long, or set `REA_BRIDGE_TOKEN_FILE` to a protected file containing it; do not set both. On Render, a secret file is available under `/etc/secrets/` and the Docker image's `node` user belongs to group 1000. Set `REA_APP_ORIGIN` to the **exact** origin of the frontend (for the published app, `https://na87666555-lgtm.github.io`); HTTPS is mandatory except for `http://localhost` or `http://127.0.0.1` development origins. `PORT` defaults to 3000. Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` only when using a system Chromium.
+
+```sh
+cd browser-bridge
+npm ci
+npx playwright install chromium
+npm test
+npm start
+```
+
+Expose the service only over HTTPS behind a trusted reverse proxy. CORS is locked to `REA_APP_ORIGIN`, and requests require `Authorization: Bearer <REA_BRIDGE_TOKEN>`. `GET /healthz` is unauthenticated and returns no session data. The process must bind to `0.0.0.0` and use the platform-provided `PORT`.
+
+An owner can request `POST /v1/pair-code` with the administrator bearer token, the configured `Origin`, and an empty JSON body. The response contains a single-use code that expires in ten minutes (host restart also invalidates it). Put it in the URL fragment of the trusted app URL as `#rea_pair=<code>&bridge=<URL-encoded-bridge-URL>`; the app clears the fragment immediately and exchanges the code for a persistent device token. A device token cannot issue new pairing codes. One code is active at a time, and ten incorrect attempts invalidate it. Share the pairing link privately with the intended phone; anyone who gets it first can use the service until the administrator token is rotated. The normal app URL contains no credential and has no pairing-link expiry.
+
+## Docker deployment
+
+Build from the `browser-bridge/` directory using its `Dockerfile`, set the two environment variables in the host's secret manager, and configure `/healthz` as the health path. The container installs Playwright's Chromium headless shell and runs as a non-root user.
+
+The browser's memory needs exceed Render's 512 MB free and starter web-service plans in local observations: the Chromium headless shell used approximately 622 MiB proportional memory after opening the three provider pages sequentially, and about 701 MiB with Claude alone. The local Docker memory cap was not verifiably enforced; platform accounting, authenticated pages and real workloads may differ. A larger plan may be required and can incur charges. Render's current next web-service size is 1 CPU / 2 GB (`1c-2g`), listed at $25/month as of 14 November 2026. Free Render services also spin down after 15 minutes of inactivity, terminating the session. Choose and approve a plan only after checking current provider pricing and limits.
+
+## Website-mode limitations
+
+Render's free plan is not a promise of permanent zero-cost operation. It sleeps after 15 idle minutes and shares 750 monthly free instance hours with the workspace's other free services. Bandwidth and build minutes have separate workspace allowances; excess usage can be billed if a payment method exists. No per-service zero-cost cap is configured by this app. See [Render's free-service limits](https://render.com/docs/free) and [bandwidth billing](https://render.com/docs/outbound-bandwidth). No paid instance, disk, or keepalive is needed for the saved-phone feature. On the free Singapore deployment tested on 15 November 2026, Gemini returned a real guest reply, while ChatGPT and Claude stopped at security verification. Authenticated three-provider operation remains unverified.
+
+The user signs into their own account on each provider's actual page, then chooses “मेरे खाते की जाँच करें”. A button press alone cannot mark an account ready. Both this check and every prompt require the official host, a recognized provider session cookie, an editable composer, and no recognized visible sign-in control. Cookie values and account identity are not returned. These are conservative readiness signals, not verification of the account's identity, premium subscription or underlying model; changing provider cookie names or controls can make the check fail. Guests and failed checks cannot receive a combined website answer. The bridge only returns a newly created assistant response, and reports missing controls or incomplete replies as errors.
+
+Opening the website-login panel reconnects the saved phone. The preview follows delayed changes for a short time after a tap, without hiding the current image. If the new image cannot be shown, the last image remains visible with input disabled. “लॉगिन पेज खोलें” opens the selected provider's fixed official sign-in URL in the same session. The optional phone-browser link uses the phone's separate account session. Saved service credentials are not filled into password inputs. Only unused pairing links expire after ten minutes. Website cookies can still expire or disappear when the free host restarts.
+
+The workflow uses the browser UI, so the model is whichever model the user selects on the website. Coarena does not choose or replace it. The app sends the prior role's result to the next site, and combines results through a final website turn. A coding role can return a strict JSON envelope of complete file changes; invalid responses cause no automatic file writes. Website mode sends attached text/code files inline (up to 50,000 characters each), and supports shared text project files. Image, PDF, audio, video and other binary attachments cannot yet be sent. Code preview remains the existing local HTML/CSS/JavaScript sandbox.
+
+Run automated checks with `npm test` here and from the repo root run `npm test` and `npm run test:browser`. The frontend integration uses fake provider pages and is not proof of authenticated provider compatibility.
+
+## Public Blender movies
+
+The public chat sends a small scene description to the Blender worker. No browser account, AI key or phone pairing is required for a supported simple scene, the example button or an attached scene script. More detailed written requests can use a configured model to compose the scene. The renderer accepts literal Python calls to `movie()` and `shape()` (see `media/blender-example.py` in the app). It validates the whole script and uses Blender's Python API to create meshes, keyframe transforms, light the scene and render on the CPU. FFmpeg encodes H.264 MP4. Imports, arbitrary Python and arbitrary bpy operators are unsupported on the shared host.
+
+Each movie is 1–6 seconds at 384×216 and 12 fps, with up to 12 objects. One job runs at once. Public jobs share a limit of six starts per rolling hour and thirty per day per running instance. The movie-only browser credential cannot operate website sessions or issue pairing codes. Jobs and results belong to the submitting browser. The host keeps at most eight jobs and expires completed jobs after 30 minutes. A host restart discards unfinished work and server copies. Successful downloads are kept in the originating phone's IndexedDB. Public access to the tool does not publish users' custom videos. The separate checked-in example is public.
+
+With Blender, FFmpeg, FFprobe and Chromium installed, run `node tests/blender-mobile.cjs` from the repo root for a real render, reload, playback and download check.
