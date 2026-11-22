@@ -9,11 +9,16 @@ test('movies require the paired device, check ownership and accept no executable
   async function req(path,auth,body){return fetch(base+path,{method:body?'POST':'GET',headers:{origin,authorization:'Bearer '+auth,'content-type':'application/json'},body:body?JSON.stringify(body):undefined});}
   try {
     assert.equal((await req('/v1/movies','invalid',{source:'shape("cube")'})).status,401);
+    const publicHeaders={origin,authorization:'Movie '+'a'.repeat(64),'content-type':'application/json'};
+    for (const route of ['/v1/connect','/v1/pair-code']) {
+      assert.equal((await fetch(base+route,{method:'POST',headers:publicHeaders,body:'{}'})).status,401);
+    }
     const code=(await (await req('/v1/pair-code',token,{})).json()).code;
     const device=(await (await req('/v1/pair','',{code})).json()).token;
     const res=await req('/v1/movies',device,{source:'import os'});
     assert.equal(res.status,202);const {id}=await res.json();
     assert.equal((await req('/v1/movies/'+id,token)).status,404);
+    assert.equal((await fetch(base+'/v1/movies/'+id,{headers:publicHeaders})).status,404);
     assert.equal((await req('/v1/movies/'+id+'/video',device)).status,409);
     assert.equal((await req('/v1/movies',device,{source:'shape("sphere")'})).status,409);
     let state;

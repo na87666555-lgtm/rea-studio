@@ -28,6 +28,7 @@ function processStep(job, bin, args, dir, onLine) {
 
 function createMovieJobs() {
   const jobs = new Map();
+  let publicStarts = [];
   let busy = false;
   function clean() {
     for (const [id,j] of jobs) if (j.finished && Date.now()-j.finished > LIFETIME) jobs.delete(id);
@@ -68,10 +69,17 @@ function createMovieJobs() {
     }
   }
   return {
-    start(owner, source) {
+    start(owner, source, publicMovie = false) {
       clean();
       if (typeof source!=='string' || !source.trim() || Buffer.byteLength(source)>8192) throw fail(400,'दृश्य की Python स्क्रिप्ट 8 KB तक रखें।');
       if (busy) throw fail(409,'सर्वर पर एक Blender रेंडर पहले से चल रहा है। उसके बाद फिर कोशिश करें।');
+      if (publicMovie) {
+        const now = Date.now();
+        publicStarts = publicStarts.filter(t => now-t < 86400000);
+        if (publicStarts.length >= 30 || publicStarts.filter(t => now-t < 3600000).length >= 6)
+          throw fail(429,'सार्वजनिक रेंडर की सीमा अभी पूरी है। बाद में फिर कोशिश करें।');
+        publicStarts.push(now);
+      }
       while (jobs.size >= 8) jobs.delete(jobs.keys().next().value);
       const j={id:randomUUID(),owner,state:'queued',frame:0,total:0,stop:new AbortController()};
       jobs.set(j.id,j);busy=true;void render(j,source);

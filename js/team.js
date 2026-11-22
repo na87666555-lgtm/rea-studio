@@ -58,6 +58,7 @@ export function routeDetails(run) {
 }
 
 export function describeReply(message) {
+  if (message.movieVideo) return 'यह MP4 Blender ने Python दृश्य स्क्रिप्ट से रेंडर किया।';
   if (message.sourceOnly) return 'इस जवाब में Rea ने सार्वजनिक स्रोत पढ़े।';
   if (message.directPython) return 'यह परिणाम Rea के Python रनटाइम से आया।';
   if (message.teamRuns) {

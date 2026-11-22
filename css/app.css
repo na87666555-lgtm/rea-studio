@@ -46,6 +46,7 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 [hidden] { display: none !important; }
+.movie-player { display: block; width: min(100%, 520px); aspect-ratio: 16/9; margin: 10px 0; border-radius: 8px; background: #152438; }
 button, input, select, textarea { font: inherit; color: inherit; }
 a { color: var(--accent); }
 

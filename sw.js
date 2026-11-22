@@ -6,7 +6,7 @@
 // does NOT change with app releases; change it only when this file's logic
 // changes. A new service worker waits until the app is closed before taking
 // over (no skipWaiting/claim), so it never swaps in during a page load.
-const CACHE = 'rea-studio-sw13';
+const CACHE = 'rea-studio-sw14';
 const ASSETS = [
   './',
   './index.html',
@@ -19,10 +19,12 @@ const ASSETS = [
   './js/vendor/three.module.min.js',
   './js/research.js',
   './js/direct-python.js',
+  './js/blender.js',
+  './media/blender-example.py',
   './js/app.js',
-  './js/app.js?ui=6',
+  './js/app.js?ui=7',
   './js/team.js?ui=2',
-  './css/app.css?ui=4',
+  './css/app.css?ui=5',
   './js/store.js',
   './js/providers.js',
   './js/markdown.js',

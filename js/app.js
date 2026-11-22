@@ -1,6 +1,7 @@
 import { planResearch, research, publicSourceUrl } from './research.js';
 import { openAnimationStudio, parseAnimationCommand } from './animation.js';
 import { parseDirectPython, runDirectPython } from './direct-python.js';
+import { blenderRequest, renderMovie, showMovies, releaseMovie } from './blender.js';
 import { loadSettings, saveSettings, loadChats, saveChats, clearAll, uid } from './store.js';
 import { PRESETS, FORMATS, ApiError, streamChat, streamTurn, toolResultMessages, listModels, friendlyError, presetForKey, keyMismatch } from './providers.js';
 import { enabledTools, runTool, toolSystemPrompt, toolLabel, toolSettings } from './tools.js';
@@ -12,7 +13,7 @@ import { PROJECT_TOOLS, filesOf, writeProject, projectTool, projectContext, prev
 import { OfficialBridge, SITE_IDS, restoreOfficialBridge, clearOfficialBridgeStorage, pairOfficialBridge, parseWebsiteEdits, buildWebsitePrompt } from './official-bridge.js';
 
 // Bump together with version.json on every release.
-const APP_VERSION = '2026.11.22-3';
+const APP_VERSION = '2026.11.22-4';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const NEW_TITLE = 'नई चैट';
@@ -190,7 +191,7 @@ function welcomeHtml() {
     <img src="icons/icon.svg" alt="" width="64" height="64">
     <h1>क्या करना चाहते हैं?</h1>
     <p>सवाल पूछें, सार्वजनिक पन्ना पढ़ने को दें या लिखें “लाल रंग का घूमता 3D घन बनाओ”।</p>
-    <p class="hint">जो काम चल रहा होगा, उसकी प्रगति और परिणाम यहीं दिखेंगे।</p>
+    <button type="button" class="btn" data-action="blender-demo">Blender से MP4 बनाएँ</button>
   </div>`;
 }
 
@@ -208,6 +209,8 @@ function messageHtml(chat, m, i) {
     ? parts.map((p, pi) => (p.type === 'text' ? renderMarkdown(p.text) : toolPartHtml(p, i, pi))).join('')
     : answer ? renderMarkdown(answer) : '';
   if (m.directPython && m.content) body = `<pre>${escapeHtml(m.content)}</pre>`;
+  if (m.movieVideo) body += `<div data-movie-id="${escapeHtml(m.movieVideo)}"><video class="movie-player" controls playsinline preload="metadata"></video><a hidden download="rea-blender.mp4">MP4 डाउनलोड करें</a><small hidden>इस डिवाइस पर फ़ाइल नहीं मिली। फिर से रेंडर करें।</small></div>`;
+  if (m.movieSource) body += `<details><summary>दृश्य की Python स्क्रिप्ट</summary><pre>${escapeHtml(m.movieSource)}</pre></details>`;
   if (m.sources?.length) {
     const sources = m.sources.filter(s => s && publicSourceUrl(s.url)).map(s =>
       `<p><strong>${escapeHtml(s.title)}</strong><br>${escapeHtml(s.text)}<br><a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer">स्रोत · ${escapeHtml(new URL(s.url).hostname)}</a></p>`).join('');
@@ -327,7 +330,7 @@ async function chatFiles(chat) {
 }
 
 function chatFileIds(list) {
-  return list.flatMap(c => c.messages.flatMap(m => (m.attachments || []).map(a => a.id)));
+  return list.flatMap(c => c.messages.flatMap(m => [...(m.attachments || []).map(a => a.id), ...(m.movieVideo ? [m.movieVideo] : [])]));
 }
 
 function toolPartHtml(p, mi, pi) {
@@ -359,6 +362,7 @@ function renderChat() {
     box.innerHTML = welcomeHtml();
   } else {
     box.innerHTML = chat.messages.map((m, i) => messageHtml(chat, m, i)).join('');
+    showMovies(box);
     scrollToBottom();
   }
   updateComposer();
@@ -372,6 +376,7 @@ function updateLastMessage() {
   if (!node) { renderChat(); return; }
   const stick = nearBottom();
   node.outerHTML = messageHtml(chat, chat.messages[i], i);
+  if (chat.messages[i].movieVideo) showMovies($('#messages'));
   if (stick) scrollToBottom();
 }
 
@@ -432,6 +437,12 @@ async function runGeneration(chat, direct) {
         msg.serviceNotice = true;
         msg.model = 'Rea Studio · स्थिति';
         msg.content = direct.notice;
+      } else if (direct.movie) {
+        const member = chat.team?.members?.map(m => ({connection:conn(m.connectionId), model:m.model})).find(m=>m.connection && m.model);
+        const connection = member?.connection || c || defaultConn();
+        await renderMovie(direct.movie, msg, {connection, model:member?.model || chat.model || connection?.defaultModel,
+          signal:controller.signal, progress:label=>{if (msg.activity!==label) {msg.activity=label;refreshStatus(chat);}},
+          persist:()=>persistChats(true)});
       } else if (direct.identity) {
         const prior = chat.messages.slice(0, -2).reverse().find(m =>
           m.role === 'assistant' && !m.identity && !m.serviceNotice && (m.teamRuns?.length || m.content && !m.error));
@@ -540,7 +551,7 @@ async function runGeneration(chat, direct) {
     if (e?.name === 'AbortError') msg.stopped = true;
     else {
       msg.error = friendlyError(e);
-      const mm = c && keyMismatch(c);
+      const mm = !direct && c && keyMismatch(c);
       if (mm) {
         msg.error.hint = `यह key ${mm.name} की लगती है, लेकिन "${c.name}" किसी दूसरे provider का पता है। ☰ → ⚙ API और सेटिंग्स में इसे "बदलें" दबाकर सेव करें, ऐप सही सेटिंग अपने आप भर देगा।`;
       }
@@ -638,6 +649,8 @@ function startAssistant(chat, direct = null) {
 }
 
 function directFor(chat, text, attachments) {
+  const movie = blenderRequest(text, attachments);
+  if (movie) return movie.notice ? {notice:movie.notice} : {movie};
   const python = parseDirectPython(text);
   if (python) return python.error ? { notice: python.error } : { python };
   if (!attachments?.length && isIdentityQuestion(text)) return { identity: true };
@@ -752,6 +765,8 @@ function retry(i) {
   const message = chat.messages[i - 1];
   if (message?.role !== 'user') return;
   const direct = requestRoute(chat, message.content, message.attachments);
+  const previous = chat.messages[i];
+  if (previous.movieVideo) { releaseMovie(previous.movieVideo); deleteFiles([previous.movieVideo]).catch(()=>{}); }
   chat.messages.splice(i, 1);
   startAssistant(chat, direct);
 }
@@ -761,6 +776,7 @@ function deleteChat(id) {
   if (!chat) return;
   if (!confirm(`"${chat.title}" हटाएँ?`)) return;
   running.get(id)?.controller.abort();
+  for (const m of chat.messages) if (m.movieVideo) releaseMovie(m.movieVideo);
   deleteFiles(chatFileIds([chat])).catch(() => {});
   chats = chats.filter(c => c.id !== id);
   if (batch) batch.chatIds = batch.chatIds.filter(x => x !== id);
@@ -1667,7 +1683,7 @@ function safeToReload() {
 }
 
 const APP_FILES = ['./', 'index.html', 'css/app.css', 'css/animation.css', 'css/call.css', 'call.html', 'js/call.js', 'js/app.js', 'js/store.js', 'js/providers.js',
-  'js/markdown.js', 'js/queue.js', 'js/team.js', 'js/research.js', 'js/direct-python.js', 'js/animation.js', 'js/project.js', 'js/official-bridge.js', 'project-preview.html', 'js/project-preview.js', 'js/tools.js', 'js/files.js', 'js/run-worker.js', 'js/py-worker.js', 'manifest.webmanifest', 'sw.js'];
+  'js/markdown.js', 'js/queue.js', 'js/team.js', 'js/research.js', 'js/direct-python.js', 'js/blender.js', 'media/blender-example.py', 'js/animation.js', 'js/project.js', 'js/official-bridge.js', 'project-preview.html', 'js/project-preview.js', 'js/tools.js', 'js/files.js', 'js/run-worker.js', 'js/py-worker.js', 'manifest.webmanifest', 'sw.js'];
 
 let updating = false;
 let checkingUpdate = false;
@@ -1822,6 +1838,12 @@ function onClick(e) {
   if (!b) return;
   const id = b.dataset.id;
   switch (b.dataset.action) {
+    case 'blender-demo':
+      if (!$('#input').value.trim() && !pendingFiles.length) {
+        $('#input').value='Blender का नमूना रेंडर करो';
+        $('#composer').requestSubmit();
+      } else toast('पहले अपना लिखा हुआ संदेश भेजें।');
+      break;
     case 'resume-chat':
       $('#officialDialog').close();
       if ($('#teamDialog').open) $('#teamDialog').close();
@@ -2101,6 +2123,13 @@ function init() {
   }
   show('chat');
   syncInstallButtons();
+  for (const chat of chats) {
+    const msg=lastMsg(chat);
+    if (msg?.role==='assistant' && msg.movieJob && !msg.movieVideo && !msg.error) {
+      delete msg.stopped; msg.pending=true;
+      runGeneration(chat,{movie:{resume:true}});
+    }
+  }
 
   if ('serviceWorker' in navigator && window.isSecureContext) {
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {});

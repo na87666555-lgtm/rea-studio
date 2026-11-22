@@ -233,12 +233,13 @@ function createBridge({ token, origin, executablePath, launch = chromium.launch.
       const authorization = req.headers.authorization || '';
       const given = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
       const isAdmin = tokenMatches(given, expectedToken);
-      if (!isAdmin && !validDeviceToken(given)) throw error(401, 'ब्राउज़र सेवा का पासकोड गलत है।');
       if (url.pathname.startsWith('/v1/movies')) {
-        const owner = hash(given).toString('hex');
+        const publicMovie = /^Movie [a-f0-9]{64}$/.test(authorization);
+        if (!publicMovie && !isAdmin && !validDeviceToken(given)) throw error(401, 'वीडियो कनेक्शन उपलब्ध नहीं है।');
+        const owner = hash(publicMovie ? authorization : given).toString('hex');
         if (req.method === 'POST' && url.pathname === '/v1/movies') {
           const { source } = await body(req);
-          return send(res, 202, movies.start(owner, source));
+          return send(res, 202, movies.start(owner, source, publicMovie));
         }
         const match = /^\/v1\/movies\/([a-f0-9-]{36})(?:\/(video|stop))?$/.exec(url.pathname);
         if (!match) throw error(404, 'रेंडर नहीं मिला।');
@@ -252,6 +253,7 @@ function createBridge({ token, origin, executablePath, launch = chromium.launch.
         }
         throw error(405, 'रेंडर अनुरोध सही नहीं है।');
       }
+      if (!isAdmin && !validDeviceToken(given)) throw error(401, 'ब्राउज़र सेवा का पासकोड गलत है।');
       if (url.pathname === '/v1/pair-code' && req.method === 'POST') {
         if (!isAdmin) throw error(403, 'नया जोड़ने वाला लिंक केवल सेवा का मालिक बना सकता है।');
         await body(req);
