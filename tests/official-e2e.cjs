@@ -41,10 +41,10 @@ async function main() {
   const origin=`http://127.0.0.1:${frontend.address().port}`;
   const executablePath=process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||(existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined);
   const bridgeBrowser=await chromium.launch({headless:true,executablePath,args:['--no-sandbox']});
-  let lastBridgePage;
+  let lastBridgePage, bridgeContext;
   const launch=async()=>({
     newContext:async options=>{
-      const context=await bridgeBrowser.newContext(options); context.on('page',p=>{lastBridgePage=p;});
+      const context=await bridgeBrowser.newContext(options); bridgeContext=context; context.on('page',p=>{lastBridgePage=p;});
       const original=context.route.bind(context);
       context.route=async (pattern,handler)=>{
         await original(pattern,handler);
@@ -83,6 +83,17 @@ async function main() {
     await page.locator('#tdTitle').fill('असली वेबसाइट टीम');
     await page.locator('#teamWebsiteHint [data-action="official-browser"]').click();
     await page.waitForFunction(()=>!document.querySelector('#officialControls').hidden);
+    await page.waitForFunction(()=>!document.querySelector('#officialScreen').hidden && document.querySelector('#officialScreen').naturalWidth > 0);
+    assert.equal(await page.locator('#officialToken').inputValue(),'');
+    await page.locator('[data-action="official-ack"]').click();
+    await page.waitForFunction(()=>document.querySelector('#officialStatus').textContent.includes('खाते का लॉगिन नहीं मिला'));
+    assert.ok((await page.locator('#officialSite').innerText()).includes('जाँच बाकी'));
+    // These cookies are test fixtures, never real provider credentials.
+    await bridgeContext.addCookies([
+      { name:'__Secure-next-auth.session-token', value:'fixture-only', url:'https://chatgpt.com', secure:true },
+      { name:'__Secure-1PSID', value:'fixture-only', url:'https://gemini.google.com', secure:true },
+      { name:'sessionKey', value:'fixture-only', url:'https://claude.ai', secure:true },
+    ]);
     for(const [id,host] of [['chatgpt','chatgpt.com'],['gemini','gemini.google.com'],['claude','claude.ai']]) {
       await page.locator(`[data-action="official-site"][data-site="${id}"]`).click();
       await page.waitForFunction(h=>document.querySelector('#officialSite').textContent.includes(h),host);
@@ -94,7 +105,7 @@ async function main() {
         assert.equal(await lastBridgePage.locator('#prompt-textarea').inputValue(),'screen-input-test');
       }
       await page.locator('[data-action="official-ack"]').click();
-      await page.waitForFunction(()=>document.querySelector('#officialSite').textContent.includes('पुष्टि दर्ज'));
+      await page.waitForFunction(()=>document.querySelector('#officialSite').textContent.includes('खाते का सत्र और चैट मिले'));
     }
     await page.locator('#officialDialog [data-action="close-dialog"]').click();
     await page.locator('#teamForm [type="submit"]').click();
@@ -107,6 +118,12 @@ async function main() {
     await page.locator('#projectBtn').click(); assert.equal(await page.locator('#projectPath').inputValue(),'index.html');
     assert.ok((await page.locator('#projectContent').inputValue()).includes('BRIDGE_CODE_TOKEN'));
     const oldSession = JSON.parse(await page.evaluate(()=>sessionStorage.getItem('rea.officialBridge.session'))).session;
+    // Losing the provider session after a successful check must block the next
+    // prompt as well; a saved boolean is never a substitute for the account.
+    await bridgeContext.clearCookies();
+    const expired = await fetch(bridgeUrl + '/v1/prompt', { method:'POST', headers:{origin,authorization:`Bearer ${token}`,'content-type':'application/json','x-rea-session':oldSession}, body:JSON.stringify({service:'chatgpt',prompt:'Do not send without an account'}) });
+    assert.equal(expired.status, 422);
+    assert.match((await expired.json()).error, /खाते का लॉगिन नहीं मिला/);
     // Simulate an idle host losing its provider browser without removing the
     // phone's pairing. The next user visit must reconnect without a new link.
     assert.equal((await fetch(bridgeUrl+'/v1/close',{method:'POST',headers:{origin,authorization:`Bearer ${token}`,'content-type':'application/json','x-rea-session':oldSession},body:'{}'})).status,200);
@@ -119,10 +136,10 @@ async function main() {
     await secondPage.locator('.drawer-options summary').click();
     await secondPage.locator('.drawer-options [data-action="official-browser"]').click();
     await secondPage.waitForFunction(()=>!document.querySelector('#officialControls').hidden);
-    assert.equal(await secondPage.locator('#officialToken').inputValue(),device.token);
+    assert.equal(await secondPage.locator('#officialToken').inputValue(),'');
     assert.notEqual(JSON.parse(await secondPage.evaluate(()=>sessionStorage.getItem('rea.officialBridge.session'))).session,oldSession);
-    assert.ok((await secondPage.locator('#officialSite').innerText()).includes('पुष्टि बाकी'));
-    assert.equal(await secondPage.locator('#officialScreen').getAttribute('src'),null);
+    assert.ok((await secondPage.locator('#officialSite').innerText()).includes('जाँच बाकी'));
+    await secondPage.waitForFunction(()=>!document.querySelector('#officialScreen').hidden && document.querySelector('#officialScreen').naturalWidth > 0);
     await secondPage.locator('#officialManual summary').click();
     await secondPage.locator('[data-action="official-close-session"]').click();
     await secondPage.waitForFunction(()=>document.querySelector('#officialControls').hidden);

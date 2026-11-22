@@ -1,6 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeBridgeUrl, parseWebsiteEdits, buildWebsitePrompt } from '../js/official-bridge.js';
+import { OfficialBridge, normalizeBridgeUrl, parseWebsiteEdits, buildWebsitePrompt } from '../js/official-bridge.js';
+
+test('a button acknowledgement cannot stand in for the service checking the account', async () => {
+  const bridge = new OfficialBridge('https://bridge.example', 'test-credential-that-is-at-least-32-characters');
+  bridge.request = async () => ({ ok: true });
+  bridge.acknowledged.chatgpt = true;
+  await assert.rejects(bridge.acknowledge('chatgpt'), /खाते की जाँच/);
+  assert.equal(bridge.acknowledged.chatgpt, undefined);
+  bridge.request = async () => ({ ok: true, ready: true });
+  await bridge.acknowledge('chatgpt');
+  assert.equal(bridge.acknowledged.chatgpt, true);
+  bridge.request = async () => { throw new Error('Login expired'); };
+  await assert.rejects(bridge.acknowledge('chatgpt'), /expired/);
+  assert.equal(bridge.acknowledged.chatgpt, undefined);
+});
 
 test('bridge URL requires HTTPS except for local development, and rejects embedded credentials', () => {
   assert.equal(normalizeBridgeUrl('https://bridge.example/'), 'https://bridge.example');

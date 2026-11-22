@@ -1,7 +1,27 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { chromium } = require('playwright');
-const { submitPrompt, assertOfficialHost, SERVICES } = require('../providers.cjs');
+const { submitPrompt, assertOfficialHost, assertAccountReady, SERVICES } = require('../providers.cjs');
+
+test('account check rejects guests, missing chat and logout controls; a session cookie alone is insufficient', async () => {
+  const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || '/usr/bin/chromium', headless: true, args: ['--no-sandbox'] });
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await context.route('**/*', r => r.fulfill({ contentType: 'text/html', body: '<textarea id="prompt-textarea"></textarea>' }));
+  try {
+    await page.goto(SERVICES.chatgpt.url);
+    await assert.rejects(assertAccountReady(page, SERVICES.chatgpt), /खाते का लॉगिन नहीं मिला/);
+    await context.addCookies([{ name: '__Secure-next-auth.session-token', value: 'fixture-only', url: SERVICES.chatgpt.url, secure: true }]);
+    await assert.doesNotReject(assertAccountReady(page, SERVICES.chatgpt));
+    await page.setContent('<h1>Security check</h1>');
+    await assert.rejects(assertAccountReady(page, SERVICES.chatgpt), /चैट अभी तैयार नहीं/);
+    await page.setContent('<textarea id="prompt-textarea"></textarea><button data-testid="login-button">Log in</button>');
+    await assert.rejects(assertAccountReady(page, SERVICES.chatgpt), /खाते का लॉगिन नहीं मिला/);
+    await context.clearCookies();
+    await page.setContent('<textarea id="prompt-textarea"></textarea>');
+    await assert.rejects(assertAccountReady(page, SERVICES.chatgpt), /खाते का लॉगिन नहीं मिला/);
+  } finally { await browser.close(); }
+});
 
 test('official host verification rejects login redirects and impostors', () => {
   assert.doesNotThrow(() => assertOfficialHost('https://chatgpt.com/c/123', SERVICES.chatgpt));

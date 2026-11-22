@@ -39,7 +39,7 @@ async function main() {
       if (url.pathname === '/v1/connect') json = { session: 'test-session', acknowledged, viewport: { width: 412, height: 780 } };
       else if (url.pathname === '/v1/status') json = { acknowledged, busy: false };
       else if (url.pathname === '/v1/view') { const site = url.searchParams.get('service'); json = { image: screenshot, host: hosts[site], acknowledged: !!acknowledged[site], busy: false }; }
-      else if (url.pathname === '/v1/acknowledge') { acknowledged[data.service] = true; json = { ok: true, notice: 'आपकी पुष्टि दर्ज हुई।' }; }
+      else if (url.pathname === '/v1/acknowledge') { acknowledged[data.service] = true; json = { ok: true, ready: true, notice: 'खाते का सत्र और चैट मिले।' }; }
       else if (url.pathname === '/v1/action') { actions.push(data); json = { ok: true }; }
       else if (url.pathname === '/v1/close') json = { ok: true };
       else if (url.pathname === '/v1/prompt') {
@@ -71,11 +71,22 @@ async function main() {
     await page.locator('#officialToken').fill(key);
     await page.locator('[data-action="official-connect"]').click();
     await page.waitForFunction(() => !document.querySelector('#officialControls').hidden);
+    await page.waitForFunction(() => !document.querySelector('#officialScreen').hidden && document.querySelector('#officialScreen').naturalWidth > 0);
+    assert.equal(await page.locator('#officialToken').inputValue(), '', 'saved credentials must not be placed in Chrome password fields');
+    const validScreenshot = screenshot;
+    screenshot = Buffer.from('not a JPEG').toString('base64');
+    await page.locator('[data-action="official-refresh"]').click();
+    await page.waitForFunction(() => document.querySelector('#officialStatus').textContent.includes('तस्वीर खुल नहीं पाई'));
+    assert.equal(await page.locator('#officialScreen').isVisible(), false);
+    assert.equal(await page.locator('[data-action="official-ack"]').isDisabled(), true);
+    screenshot = validScreenshot;
+    await page.locator('[data-action="official-refresh"]').click();
+    await page.waitForFunction(() => !document.querySelector('#officialScreen').hidden && document.querySelector('#officialScreen').naturalWidth > 0);
     for (const site of ['chatgpt', 'gemini', 'claude']) {
       await page.locator(`[data-action="official-site"][data-site="${site}"]`).click();
       await page.waitForFunction(host => document.querySelector('#officialSite').textContent.includes(host), hosts[site]);
       await page.locator('[data-action="official-ack"]').click();
-      await page.waitForFunction(() => document.querySelector('#officialSite').textContent.includes('पुष्टि दर्ज'));
+      await page.waitForFunction(() => document.querySelector('#officialSite').textContent.includes('खाते का सत्र और चैट मिले'));
     }
     await page.locator('#officialText').fill('test input');
     await page.locator('[data-action="official-type"]').click();

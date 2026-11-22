@@ -191,7 +191,7 @@ test('website switching retains one page and an active reply cannot be interrupt
   const context = { route: async () => {}, routeWebSocket: async () => {}, newPage: async () => { opened++; return fakePage(); }, close: async () => {} };
   const launch = async () => ({ newContext: async () => context, close: async () => {} });
   const sendPrompt = async () => { started(); await new Promise(r => { release = r; }); return 'actual-site-reply'; };
-  const server = createBridge({ token, origin, launch, sendPrompt });
+  const server = createBridge({ token, origin, launch, sendPrompt, checkAccount: async () => {} });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   const headers = { origin, authorization: `Bearer ${token}`, 'content-type': 'application/json' };

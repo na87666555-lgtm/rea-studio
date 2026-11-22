@@ -54,7 +54,13 @@ export class OfficialBridge {
   async status(signal) { const r = await this.request('/v1/status', { signal }); this.acknowledged = r.acknowledged || {}; return r; }
   async view(service, signal) { return this.request('/v1/view?service=' + encodeURIComponent(service), { signal }); }
   async action(service, action, values = {}, signal) { return this.request('/v1/action', { method: 'POST', data: { service, action, ...values }, signal }); }
-  async acknowledge(service, signal) { const r = await this.request('/v1/acknowledge', { method: 'POST', data: { service }, signal }); this.acknowledged[service] = true; return r; }
+  async acknowledge(service, signal) {
+    delete this.acknowledged[service];
+    const r = await this.request('/v1/acknowledge', { method: 'POST', data: { service }, signal });
+    if (r.ready !== true) throw new Error('सेवा ने खाते की जाँच की पुष्टि नहीं दी। लॉगिन पूरा हुआ नहीं माना गया।');
+    this.acknowledged[service] = true;
+    return r;
+  }
   async prompt(service, prompt, signal) { return this.request('/v1/prompt', { method: 'POST', data: { service, prompt }, signal }); }
   async close({ forget = true } = {}) {
     try { if (this.session) await this.request('/v1/close', { method: 'POST', signal: AbortSignal.timeout(15000) }); }

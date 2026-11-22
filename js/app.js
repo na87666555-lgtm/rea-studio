@@ -12,7 +12,7 @@ import { PROJECT_TOOLS, filesOf, writeProject, projectTool, projectContext, prev
 import { OfficialBridge, SITE_IDS, restoreOfficialBridge, clearOfficialBridgeStorage, pairOfficialBridge, parseWebsiteEdits, buildWebsitePrompt } from './official-bridge.js';
 
 // Bump together with version.json on every release.
-const APP_VERSION = '2026.11.21-3';
+const APP_VERSION = '2026.11.22-1';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const NEW_TITLE = 'नई चैट';
@@ -43,6 +43,7 @@ function takePairingLink() {
   return { code: params.get('rea_pair'), base: params.get('bridge') };
 }
 let officialSite = 'chatgpt';
+let officialScreenSite = '';
 let officialActionBusy = false;
 let officialTeamBusy = false;
 let pendingFiles = []; // attachments picked for the next message
@@ -826,16 +827,23 @@ function setOfficialBusy(busy) {
   officialActionBusy = busy;
   $('#officialDialog').querySelectorAll('button:not([data-action="close-dialog"])').forEach(button => { button.disabled = busy; });
   $('#officialScreen').setAttribute('aria-busy', String(busy));
+  $('[data-action="official-ack"]').disabled = busy || officialScreenSite !== officialSite;
   if (!busy && pairLink && !officialTeamBusy) queueMicrotask(connectPairLink);
+}
+function clearOfficialScreen() {
+  officialScreenSite = '';
+  $('#officialScreen').hidden = true;
+  $('#officialScreen').removeAttribute('src');
+  $('[data-action="official-ack"]').disabled = true;
 }
 function refreshOfficialSiteLabel(host = '') {
   const done = !!officialBridge?.acknowledged[officialSite];
-  $('#officialSite').textContent = `${SITE_NAMES[officialSite]}${host ? ` · ${host}` : ''} · ${done ? 'आपकी लॉगिन पुष्टि दर्ज है' : 'लॉगिन की पुष्टि बाकी है'}`;
+  $('#officialSite').textContent = `${SITE_NAMES[officialSite]}${host ? ` · ${host}` : ''} · ${done ? 'खाते का सत्र और चैट मिले' : 'आपके खाते की जाँच बाकी है'}`;
 }
 function openOfficialDialog({ reconnect = true } = {}) {
   closeDrawer();
   $('#officialUrl').value = officialBridge?.base || '';
-  $('#officialToken').value = officialBridge?.token || '';
+  $('#officialToken').value = '';
   $('#officialText').value = '';
   $('#officialControls').hidden = !officialBridge?.session;
   $('#officialManual').open = false;
@@ -854,7 +862,7 @@ async function connectPairLink() {
   try {
     officialBridge = await pairOfficialBridge(pairing.base, pairing.code, AbortSignal.timeout(90000));
     $('#officialUrl').value = officialBridge.base;
-    $('#officialToken').value = officialBridge.token;
+    $('#officialToken').value = '';
     $('#officialManage').hidden = false;
     $('#officialManual').open = false;
     $('#officialControls').hidden = false;
@@ -864,52 +872,68 @@ async function connectPairLink() {
   } catch (e) {
     officialBridge = restoreOfficialBridge();
     $('#officialUrl').value = officialBridge?.base || '';
-    $('#officialToken').value = officialBridge?.token || '';
+    $('#officialToken').value = '';
     officialStatus(e.message);
     toast('वेबसाइट कनेक्शन नहीं जुड़ा। सामान्य चैट खुली है।');
   } finally { setOfficialBusy(false); }
+  if (officialBridge?.session && $('#officialDialog').open) await viewOfficial();
 }
 async function connectOfficial() {
   if (officialActionBusy) return;
   setOfficialBusy(true);
   $('#officialControls').hidden = true;
-  $('#officialScreen').removeAttribute('src');
+  clearOfficialScreen();
+  let connected = false;
   try {
-    const candidate = new OfficialBridge($('#officialUrl').value, $('#officialToken').value);
+    const base = $('#officialUrl').value.trim().replace(/\/+$/, '');
+    const token = $('#officialToken').value || (base === officialBridge?.base ? officialBridge.token : '');
+    const candidate = new OfficialBridge(base, token);
     officialStatus('सेवा से जुड़ रहे हैं… मुफ़्त सर्वर सोया हो तो जागने में लगभग एक मिनट लग सकता है।');
     await candidate.connect(AbortSignal.timeout(90000));
     officialBridge = candidate;
-    $('#officialToken').value = candidate.token;
+    // Do not fill the service credential into a password field; Chrome can
+    // otherwise offer to save it as the user's Google/provider password.
+    $('#officialToken').value = '';
     $('#officialManage').hidden = false;
     $('#officialManual').open = false;
     $('#officialControls').hidden = false;
     officialStatus('सेवा जुड़ गई। एक वेबसाइट चुनें और लॉगिन करें।');
     refreshOfficialSiteLabel();
+    connected = true;
   } catch (e) {
     if (officialBridge) { officialBridge.session = ''; officialBridge.acknowledged = {}; }
     refreshOfficialSiteLabel();
     officialStatus(e.message);
   }
   finally { setOfficialBusy(false); }
+  if (connected && $('#officialDialog').open) await viewOfficial();
 }
 async function viewOfficial() {
   if (!officialBridge?.session || officialActionBusy) return;
   setOfficialBusy(true);
+  clearOfficialScreen();
   try {
     const site = officialSite;
     officialStatus('वेबसाइट की स्क्रीन आ रही है…');
     const data = await officialBridge.view(site, AbortSignal.timeout(60000));
     if (site !== officialSite) return;
     if (typeof data.image !== 'string' || !/^[A-Za-z0-9+/=]+$/.test(data.image) || data.image.length > 5000000) throw new Error('वेबसाइट की स्क्रीन नहीं मिली।');
-    $('#officialScreen').src = 'data:image/jpeg;base64,' + data.image;
+    const screen = $('#officialScreen');
+    screen.src = 'data:image/jpeg;base64,' + data.image;
+    try { await screen.decode(); }
+    catch { throw new Error('वेबसाइट की तस्वीर खुल नहीं पाई। स्क्रीन ताज़ा करें।'); }
+    if (site !== officialSite) return;
+    screen.hidden = false;
+    officialScreenSite = site;
     refreshOfficialSiteLabel(data.host || '');
     officialStatus(data.busy ? 'टीम काम कर रही है। स्क्रीन देखने के लिए ताज़ा करें।' : 'स्क्रीन पर टैप करके नियंत्रण करें।');
-  } catch (e) { officialStatus(e.message); }
+  } catch (e) { clearOfficialScreen(); officialStatus(e.message); }
   finally { setOfficialBusy(false); }
 }
 async function officialAction(action, values = {}) {
   if (officialTeamBusy) { officialStatus('टीम का काम पूरा होने दें या चैट से उसे रोकें।'); return false; }
   if (!officialBridge?.session || officialActionBusy) return false;
+  if (action !== 'reset' && officialScreenSite !== officialSite) { officialStatus('पहले वेबसाइट की स्क्रीन खुलने दें या स्क्रीन ताज़ा करें।'); return false; }
   setOfficialBusy(true);
   try {
     await officialBridge.action(officialSite, action, values, AbortSignal.timeout(30000));
@@ -922,12 +946,13 @@ async function officialAction(action, values = {}) {
 async function confirmOfficialLogin() {
   if (officialTeamBusy) { officialStatus('टीम का काम पूरा होने दें या चैट से उसे रोकें।'); return; }
   if (!officialBridge?.session || officialActionBusy) return;
+  if (officialScreenSite !== officialSite) { officialStatus('पहले वेबसाइट की स्क्रीन खोलकर अपनी ID से लॉगिन करें।'); return; }
   setOfficialBusy(true);
   try {
     const r = await officialBridge.acknowledge(officialSite, AbortSignal.timeout(30000));
-    refreshOfficialSiteLabel(); officialStatus(r.notice || 'आपकी पुष्टि दर्ज हुई।');
+    officialStatus(r.notice || 'खाते का सत्र और चैट मिले।');
   } catch (e) { officialStatus(e.message); }
-  finally { setOfficialBusy(false); }
+  finally { refreshOfficialSiteLabel(); setOfficialBusy(false); }
 }
 async function closeOfficialSession(forget = false) {
   if (!officialBridge || officialActionBusy) return;
@@ -938,8 +963,8 @@ async function closeOfficialSession(forget = false) {
   finally {
     if (forget) officialBridge = null;
     $('#officialManage').hidden = !officialBridge;
-    setOfficialBusy(false); $('#officialControls').hidden = true; $('#officialScreen').removeAttribute('src');
-    $('#officialToken').value = officialBridge?.token || '';
+    setOfficialBusy(false); $('#officialControls').hidden = true; clearOfficialScreen();
+    $('#officialToken').value = '';
     refreshOfficialSiteLabel();
   }
 }
@@ -1755,7 +1780,7 @@ function onClick(e) {
     case 'official-forget': closeOfficialSession(true); break;
     case 'official-site':
       if (officialTeamBusy) { officialStatus('टीम का काम पूरा होने दें या चैट से उसे रोकें।'); break; }
-      if (!officialActionBusy && SITE_IDS.includes(b.dataset.site)) { officialSite = b.dataset.site; $('#officialScreen').removeAttribute('src'); refreshOfficialSiteLabel(); viewOfficial(); }
+      if (!officialActionBusy && SITE_IDS.includes(b.dataset.site)) { officialSite = b.dataset.site; clearOfficialScreen(); refreshOfficialSiteLabel(); viewOfficial(); }
       break;
     case 'official-refresh': viewOfficial(); break;
     case 'official-up': officialAction('scroll', { delta: -550 }); break;

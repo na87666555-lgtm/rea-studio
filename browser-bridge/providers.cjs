@@ -9,6 +9,8 @@ const SERVICES = Object.freeze({
     sends: ['button[data-testid="send-button"]', 'button[aria-label="Send prompt"]', 'button[aria-label="Send message"]'],
     answers: ['[data-message-author-role="assistant"]', '[data-assistant-markdown-root]'],
     stops: ['button[data-testid="stop-button"]', 'button[aria-label*="Stop"]', 'button[aria-label*="रोक"]'],
+    accountCookie: /^__Secure-(?:next-auth|authjs)\.session-token(?:\.\d+)?$/,
+    signIns: ['[data-testid="login-button"]', 'a[href*="/auth/login"]'],
   },
   gemini: {
     name: 'Gemini', url: 'https://gemini.google.com/app', hosts: ['gemini.google.com'],
@@ -16,6 +18,8 @@ const SERVICES = Object.freeze({
     sends: ['button.send-button', 'button[aria-label="Send message"]', 'button[aria-label="Send"]'],
     answers: ['model-response message-content', 'model-response', '[data-test-id="model-response"]'],
     stops: ['button[aria-label*="Stop"]', 'button[aria-label*="रोक"]', 'button.stop-button'],
+    accountCookie: /^(?:SID|__Secure-[13]PSID)$/,
+    signIns: ['a[href*="accounts.google.com/ServiceLogin"]', 'a[href*="accounts.google.com/InteractiveLogin"]'],
   },
   claude: {
     name: 'Claude', url: 'https://claude.ai/', hosts: ['claude.ai', 'claude.com'],
@@ -23,6 +27,8 @@ const SERVICES = Object.freeze({
     sends: ['button[data-testid="send-button"]', 'button[aria-label="Send message"]', 'button[aria-label="Send Message"]'],
     answers: ['[data-testid="assistant-message"]', '[data-is-streaming] .font-claude-response', '.font-claude-response'],
     stops: ['button[aria-label*="Stop"]', 'button[aria-label*="रोक"]', 'button[data-testid="stop-button"]'],
+    accountCookie: /^sessionKey$/,
+    signIns: ['a[href="/login"]', 'a[href^="/login?"]'],
   },
 });
 
@@ -49,6 +55,20 @@ async function firstVisible(page, selectors, editable = false) {
     }
   }
   return null;
+}
+
+// A user pressing a button is not evidence of a logged-in account. Require
+// both a provider session cookie and an editable chat on the official host.
+// Inspect cookie names only; never return identity, cookie values or plan claims.
+async function assertAccountReady(page, service) {
+  assertOfficialHost(page.url(), service);
+  const cookies = await page.context().cookies(service.url);
+  if (!cookies.some(cookie => service.accountCookie.test(cookie.name)) || await firstVisible(page, service.signIns)) {
+    throw new Error(`${service.name} में आपके खाते का लॉगिन नहीं मिला। नीचे असली वेबसाइट की स्क्रीन पर अपनी ID से लॉगिन करें।`);
+  }
+  if (!await firstVisible(page, service.inputs, true)) {
+    throw new Error(`${service.name} का चैट अभी तैयार नहीं है। वेबसाइट की स्क्रीन पर लॉगिन या सुरक्षा-जाँच पूरी करें, फिर खाते की जाँच दोबारा करें।`);
+  }
 }
 
 async function answerSnapshot(page, selectors) {
@@ -103,4 +123,4 @@ async function submitPrompt(page, service, prompt, { signal, timeoutMs = WAIT_MS
   throw new Error(`${service.name} से नया पूरा जवाब नहीं मिला। वेबसाइट पर जाँचें; संभव है लॉगिन, CAPTCHA या वेबसाइट के बदले हुए नियंत्रण की वजह से रुक गया हो।`);
 }
 
-module.exports = { SERVICES, assertOfficialHost, submitPrompt };
+module.exports = { SERVICES, assertOfficialHost, assertAccountReady, submitPrompt };

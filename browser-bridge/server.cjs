@@ -6,7 +6,7 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const { chromium } = require('playwright');
-const { SERVICES, assertOfficialHost, submitPrompt } = require('./providers.cjs');
+const { SERVICES, assertAccountReady, submitPrompt } = require('./providers.cjs');
 
 const MAX_BODY = 160000;
 const IDLE_MS = 20 * 60 * 1000;
@@ -49,7 +49,7 @@ function configuration(env = process.env) {
 function hash(text) { return crypto.createHash('sha256').update(text).digest(); }
 function tokenMatches(given, token) { return crypto.timingSafeEqual(hash(given), hash(token)); }
 
-function createBridge({ token, origin, executablePath, launch = chromium.launch.bind(chromium), sendPrompt = submitPrompt, idleMs = IDLE_MS } = {}) {
+function createBridge({ token, origin, executablePath, launch = chromium.launch.bind(chromium), sendPrompt = submitPrompt, checkAccount = assertAccountReady, idleMs = IDLE_MS } = {}) {
   if (typeof token !== 'string' || token.length < 32 || !origin) throw new Error('Bridge configuration missing.');
   let browserPromise = null;
   let activeSession = null;
@@ -283,9 +283,10 @@ function createBridge({ token, origin, executablePath, launch = chromium.launch.
         const data = await body(req); const svc = serviceOf(data.service);
         if (session.busy) throw error(409, 'टीम काम कर रही है; पहले उसे रोकें।');
         const page = await pageFor(session, data.service);
-        try { assertOfficialHost(page.url(), svc); } catch (e) { throw error(400, e.message); }
+        try { await checkAccount(page, svc); }
+        catch (e) { delete session.acknowledged[data.service]; throw error(409, e.message); }
         session.acknowledged[data.service] = true;
-        return send(res, 200, { ok: true, notice: 'यह आपकी पुष्टि है; ऐप स्वतंत्र रूप से लॉगिन या मॉडल की पहचान सत्यापित नहीं करता।' });
+        return send(res, 200, { ok: true, ready: true, notice: 'खाते का सत्र और चैट मिले। प्रीमियम प्लान और मॉडल की पुष्टि वेबसाइट पर अपने खाते में देखें।' });
       }
       if (url.pathname === '/v1/prompt' && req.method === 'POST') {
         const data = await body(req); const svc = serviceOf(data.service);
@@ -298,6 +299,8 @@ function createBridge({ token, origin, executablePath, launch = chromium.launch.
         res.once('close', disconnected);
         try {
           const page = await pageFor(session, data.service);
+          try { await checkAccount(page, svc); }
+          catch (e) { delete session.acknowledged[data.service]; throw e; }
           const answer = await sendPrompt(page, svc, data.prompt, { signal: controller.signal });
           return send(res, 200, { answer, source: svc.name, host: new URL(page.url()).hostname });
         } catch (e) {

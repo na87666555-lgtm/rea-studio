@@ -11,10 +11,10 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="stylesheet" href="css/app.css?ui=3">
+  <link rel="stylesheet" href="css/app.css?ui=4">
   <link rel="stylesheet" href="css/animation.css">
   <script type="module" src="js/animation.js"></script>
-  <script type="module" src="js/app.js?ui=3"></script>
+  <script type="module" src="js/app.js?ui=4"></script>
 </head>
 <body>
   <div id="app">
@@ -126,14 +126,15 @@
       <div class="row wrap" id="officialManage" hidden><button type="button" class="btn" data-action="official-close-session">सत्र बंद करें</button><button type="button" class="btn danger" data-action="official-forget">फ़ोन का कनेक्शन हटाएँ</button></div>
     </details>
     <div id="officialControls" hidden>
+      <p class="hint">फ़ोन का कनेक्शन सेव है; इसकी 10 मिनट की सीमा नहीं है। नीचे वेबसाइट की स्क्रीन पर अपनी ID से लॉगिन करें। फोन में पहले से खुला खाता यहाँ अपने-आप नहीं आता।</p>
       <div class="row wrap"><button type="button" class="btn small" data-action="official-site" data-site="chatgpt">ChatGPT</button><button type="button" class="btn small" data-action="official-site" data-site="gemini">Gemini</button><button type="button" class="btn small" data-action="official-site" data-site="claude">Claude</button></div>
       <p id="officialSite" class="hint"></p>
-      <img id="officialScreen" class="official-screen" alt="चुनी वेबसाइट की स्क्रीन; टैप या स्वाइप करके नियंत्रण करें">
+      <img id="officialScreen" class="official-screen" hidden alt="चुनी वेबसाइट की स्क्रीन; टैप या स्वाइप करके नियंत्रण करें">
       <div class="row wrap"><button type="button" class="btn small" data-action="official-refresh">↻ स्क्रीन ताज़ा</button><button type="button" class="btn small" data-action="official-up">↑ ऊपर</button><button type="button" class="btn small" data-action="official-down">↓ नीचे</button><button type="button" class="btn small" data-action="official-enter">↵ Enter</button><button type="button" class="btn small" data-action="official-backspace">⌫</button><button type="button" class="btn small" data-action="official-select-all">सब चुनें</button><button type="button" class="btn small" data-action="official-tab">Tab</button></div>
       <label>चुनी हुई जगह पर लिखें <input id="officialText" type="password" autocomplete="off" spellcheck="false" placeholder="ईमेल, पासवर्ड या अन्य टेक्स्ट"></label>
       <div class="row wrap"><button type="button" class="btn small" data-action="official-type">टेक्स्ट भेजें</button><button type="button" class="btn small" data-action="official-toggle">टेक्स्ट दिखाएँ</button><button type="button" class="btn small" data-action="official-reset">वेबसाइट फिर खोलें</button></div>
-      <button type="button" class="btn primary" data-action="official-ack">मैंने इस वेबसाइट में लॉगिन पूरा किया</button>
-      <p class="hint">तीनों वेबसाइटों पर लॉगिन के बाद बारी-बारी यह बटन दबाएँ। यह आपकी पुष्टि है; ऐप लॉगिन को स्वतंत्र रूप से सत्यापित नहीं करता। निष्क्रिय सत्र बंद होने पर फिर लॉगिन करना पड़ेगा।</p>
+      <button type="button" class="btn primary" data-action="official-ack" disabled>मेरे खाते की जाँच करें</button>
+      <p class="hint">लॉगिन के बाद जाँच करें। बटन दबाने से लॉगिन नहीं होता। प्रीमियम प्लान वेबसाइट पर अपने खाते में देखें। सेवा दोबारा शुरू होने या वेबसाइट का सत्र समाप्त होने पर फिर लॉगिन करना पड़ सकता है; फ़ोन का कनेक्शन सेव रहता है।</p>
     </div>
   </dialog>
 
