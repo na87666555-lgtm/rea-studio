@@ -51,16 +51,16 @@ async function api(path, signal, body, binary=false) {
   if(body) headers['Content-Type']='application/json';
   const timeout=AbortSignal.timeout(90000);
   const res=await fetch(base+path,{method:body?'POST':'GET',credentials:'omit',referrerPolicy:'no-referrer',redirect:'error',cache:'no-store',headers,signal:AbortSignal.any([signal,timeout]),...(body?{body:JSON.stringify(body)}:{})});
-  if (!res.ok) throw new Error((await res.json().catch(()=>({}))).error || 'वीडियो सेवा उपलब्ध नहीं है।');
+  if (!res.ok) throw Object.assign(new Error((await res.json().catch(()=>({}))).error || 'वीडियो सेवा उपलब्ध नहीं है।'),{status:res.status});
   if (!binary) return res.json();
   if (!res.headers.get('Content-Type')?.startsWith('video/mp4')) throw new Error('सर्वर से MP4 नहीं मिला।');
   return res.blob();
 }
-function pause(signal) {
+function pause(signal, ms=2200) {
   return new Promise((resolve,reject)=>{
     signal.throwIfAborted();
     const cancel=()=>{clearTimeout(timer);reject(signal.reason);};
-    const timer=setTimeout(()=>{signal.removeEventListener('abort',cancel);resolve();},2200);
+    const timer=setTimeout(()=>{signal.removeEventListener('abort',cancel);resolve();},ms);
     signal.addEventListener('abort',cancel,{once:true});
   });
 }
@@ -92,21 +92,35 @@ export async function renderMovie(spec, msg, {connection, model, signal, progres
     msg.movieJob=id=created.id; persist();
   }
   if (!allowedId.test(id)) throw new Error('रेंडर नंबर मान्य नहीं है।');
+  // A mobile page may lose its connection during navigation or a server wake.
+  // Only retry reads. A repeated POST could start a second render.
+  async function read(path, binary=false) {
+    for (let attempt=0; ;attempt++) {
+      try { return await api(path,signal,null,binary); }
+      catch (err) {
+        if (signal.aborted || (err.status && err.status<500)) throw err;
+        if (attempt>=4) throw new Error('रेंडर का कनेक्शन टूट गया। “फिर से” दबाने पर इसी काम का परिणाम जाँचा जाएगा।');
+        progress('रेंडर सर्वर से दोबारा जुड़ रहे हैं…');
+        await pause(signal,Math.min(2000*(attempt+1),8000));
+      }
+    }
+  }
   try {
     for (;;) {
-      const j=await api('/'+id,signal);
+      const j=await read('/'+id);
       if (j.state==='done') break;
-      if (!['queued','rendering','encoding'].includes(j.state)) throw new Error(j.error || 'वीडियो रेंडर बंद हो गया।');
+      if (!['queued','rendering','encoding'].includes(j.state)) { delete msg.movieJob; throw new Error(j.error || 'वीडियो रेंडर बंद हो गया।'); }
       progress(j.state==='encoding'?'फ़्रेम से MP4 बन रहा है…':j.total?'Blender: '+j.frame+' / '+j.total+' फ़्रेम पूरे':'Blender में Python दृश्य खुल रहा है…');
       await pause(signal);
     }
     progress('MP4 इस डिवाइस पर सहेजा जा रहा है…');
-    const blob=await api('/'+id+'/video',signal,null,true);
+    const blob=await read('/'+id+'/video',true);
     if (blob.size<100 || (await blob.slice(4,8).text())!=='ftyp') throw new Error('पूरा MP4 नहीं मिला।');
     await putFile(id,blob); msg.movieVideo=id;
     msg.content='Blender ने दृश्य रेंडर किया। MP4 यहीं चला सकते हैं या डाउनलोड कर सकते हैं।';
     delete msg.movieJob;
   } catch(e) {
+    if (e.status===404) delete msg.movieJob;
     if (signal.aborted) { await api('/'+id+'/stop',AbortSignal.timeout(5000),{}).catch(()=>{}); delete msg.movieJob; }
     throw e;
   }

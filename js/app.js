@@ -13,7 +13,7 @@ import { PROJECT_TOOLS, filesOf, writeProject, projectTool, projectContext, prev
 import { OfficialBridge, SITE_IDS, restoreOfficialBridge, clearOfficialBridgeStorage, pairOfficialBridge, parseWebsiteEdits, buildWebsitePrompt } from './official-bridge.js';
 
 // Bump together with version.json on every release.
-const APP_VERSION = '2026.11.22-4';
+const APP_VERSION = '2026.11.22-5';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const NEW_TITLE = 'नई चैट';
@@ -764,6 +764,11 @@ function retry(i) {
   if (chat.team?.mode === 'website' && officialTeamBusy) { toast('वेबसाइट टीम पहले से काम कर रही है।'); return; }
   const message = chat.messages[i - 1];
   if (message?.role !== 'user') return;
+  const saved=chat.messages[i];
+  if (saved.movieJob && !saved.movieVideo) {
+    delete saved.error; delete saved.stopped; saved.pending=true;
+    runGeneration(chat,{movie:{resume:true}}); return;
+  }
   const direct = requestRoute(chat, message.content, message.attachments);
   const previous = chat.messages[i];
   if (previous.movieVideo) { releaseMovie(previous.movieVideo); deleteFiles([previous.movieVideo]).catch(()=>{}); }
@@ -2125,8 +2130,8 @@ function init() {
   syncInstallButtons();
   for (const chat of chats) {
     const msg=lastMsg(chat);
-    if (msg?.role==='assistant' && msg.movieJob && !msg.movieVideo && !msg.error) {
-      delete msg.stopped; msg.pending=true;
+    if (msg?.role==='assistant' && msg.movieJob && !msg.movieVideo) {
+      delete msg.error; delete msg.stopped; msg.pending=true;
       runGeneration(chat,{movie:{resume:true}});
     }
   }

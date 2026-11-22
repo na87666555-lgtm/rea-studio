@@ -17,6 +17,11 @@ const listen=s=>new Promise(r=>s.listen(0,'127.0.0.1',r));
  const browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});
  try {
   const page=await browser.newPage({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
+  if(live) {
+    page.on('console',m=>{if(m.type()==='error') console.log('browser:',m.text().replace(/[0-9a-f-]{36}/gi,'JOB').slice(0,450));});
+    page.on('requestfailed',r=>console.log('failed:',r.method(),new URL(r.url()).pathname.replace(/[0-9a-f-]{36}/gi,'JOB'),r.failure()?.errorText));
+    page.on('response',r=>{if(r.url().includes('/v1/movies')) console.log('response:',r.status(),new URL(r.url()).pathname.replace(/[0-9a-f-]{36}/gi,'JOB'));});
+  }
   if(!live) await page.route('https://rea-official-browser.onrender.com/v1/movies**', async r=>{
     const u=new URL(r.request().url());const h=r.request().headers();h.origin=origin;
     const res=await r.fetch({url:'http://127.0.0.1:'+bridge.address().port+u.pathname,headers:h});await r.fulfill({response:res});
