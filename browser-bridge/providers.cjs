@@ -5,6 +5,7 @@
 const SERVICES = Object.freeze({
   chatgpt: {
     name: 'ChatGPT', url: 'https://chatgpt.com/', hosts: ['chatgpt.com', 'chat.openai.com'],
+    loginUrl: 'https://chatgpt.com/auth/login',
     inputs: ['#prompt-textarea', '#mobile-composer-prompt', '[data-testid="prompt-textarea"]', 'textarea[data-id="root"]'],
     sends: ['button[data-testid="send-button"]', 'button[aria-label="Send prompt"]', 'button[aria-label="Send message"]'],
     answers: ['[data-message-author-role="assistant"]', '[data-assistant-markdown-root]'],
@@ -14,6 +15,7 @@ const SERVICES = Object.freeze({
   },
   gemini: {
     name: 'Gemini', url: 'https://gemini.google.com/app', hosts: ['gemini.google.com'],
+    loginUrl: 'https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fgemini.google.com%2Fapp',
     inputs: ['rich-textarea [role="textbox"][contenteditable="true"]', '[role="textbox"][contenteditable="true"]', 'div.ql-editor[contenteditable="true"]'],
     sends: ['button.send-button', 'button[aria-label="Send message"]', 'button[aria-label="Send"]'],
     answers: ['model-response message-content', 'model-response', '[data-test-id="model-response"]'],
@@ -23,6 +25,7 @@ const SERVICES = Object.freeze({
   },
   claude: {
     name: 'Claude', url: 'https://claude.ai/', hosts: ['claude.ai', 'claude.com'],
+    loginUrl: 'https://claude.ai/login',
     inputs: ['[data-testid="chat-input"] [contenteditable="true"]', '[data-testid="chat-input"][contenteditable="true"]', 'div.ProseMirror[contenteditable="true"]'],
     sends: ['button[data-testid="send-button"]', 'button[aria-label="Send message"]', 'button[aria-label="Send Message"]'],
     answers: ['[data-testid="assistant-message"]', '[data-is-streaming] .font-claude-response', '.font-claude-response'],

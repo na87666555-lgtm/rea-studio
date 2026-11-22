@@ -183,7 +183,7 @@ test('website switching retains one page and an active reply cannot be interrupt
   let started; const startedPromise = new Promise(r => { started = r; });
   const fakePage = () => {
     let current = '', closed = false;
-    return { on: () => {}, goto: async url => { current = url; }, url: () => current,
+    return { on: () => {}, goto: async url => { current = url; }, url: () => current, title: async () => 'Just a moment...',
       isClosed: () => closed, close: async () => { if (!closed) { closed = true; closedPages++; } },
       screenshot: async () => Buffer.from('image'), mouse: { click: async () => {}, wheel: async () => {} },
       keyboard: { insertText: async () => {}, press: async () => {} } };
@@ -198,7 +198,11 @@ test('website switching retains one page and an active reply cannot be interrupt
   const post = (route, data) => fetch(base + route, { method: 'POST', headers, body: JSON.stringify(data) });
   try {
     const connected = await (await post('/v1/connect', {})).json(); headers['x-rea-session'] = connected.session;
-    assert.equal((await fetch(base + '/v1/view?service=chatgpt', { headers })).status, 200);
+    const login = await post('/v1/action', { service: 'chatgpt', action: 'login', url: 'https://example.invalid' });
+    assert.equal(login.status, 200);
+    const view = await (await fetch(base + '/v1/view?service=chatgpt', { headers })).json();
+    assert.equal(view.host, 'chatgpt.com');
+    assert.equal(view.securityCheck, true);
     assert.equal((await post('/v1/acknowledge', { service: 'chatgpt' })).status, 200);
     const reply = post('/v1/prompt', { service: 'chatgpt', prompt: 'hello' });
     await startedPromise;

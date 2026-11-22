@@ -34,7 +34,7 @@ export class OfficialBridge {
       throw new Error('ब्राउज़र सेवा से संपर्क नहीं हुआ। उसका पता और कनेक्शन जाँचें।');
     }
     const result = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(result.error || `ब्राउज़र सेवा ने त्रुटि दी (${response.status})।`);
+    if (!response.ok) throw Object.assign(new Error(result.error || `ब्राउज़र सेवा ने त्रुटि दी (${response.status})।`), { status: response.status });
     return result;
   }
   async connect(signal) {

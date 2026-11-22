@@ -12,7 +12,7 @@ import { PROJECT_TOOLS, filesOf, writeProject, projectTool, projectContext, prev
 import { OfficialBridge, SITE_IDS, restoreOfficialBridge, clearOfficialBridgeStorage, pairOfficialBridge, parseWebsiteEdits, buildWebsitePrompt } from './official-bridge.js';
 
 // Bump together with version.json on every release.
-const APP_VERSION = '2026.11.22-2';
+const APP_VERSION = '2026.11.22-3';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const NEW_TITLE = 'नई चैट';
@@ -44,6 +44,8 @@ function takePairingLink() {
 }
 let officialSite = 'chatgpt';
 let officialScreenSite = '';
+let previewTimer;
+let previewRequest;
 let officialActionBusy = false;
 let officialTeamBusy = false;
 let pendingFiles = []; // attachments picked for the next message
@@ -822,19 +824,39 @@ function saveWebsiteEdits(chat, index, result) {
 }
 
 const SITE_NAMES = { chatgpt: 'ChatGPT', gemini: 'Gemini', claude: 'Claude' };
+const PHONE_LOGIN_URLS = { chatgpt: 'https://chatgpt.com/auth/login', gemini: 'https://gemini.google.com/app', claude: 'https://claude.ai/login' };
 function officialStatus(message) { $('#officialStatus').textContent = message; }
+function stopPreviewUpdates() {
+  clearTimeout(previewTimer);
+  previewRequest?.abort();
+}
+function previewStatus(text, phoneOption = false) {
+  $('#officialPreviewStatus').textContent = text;
+  $('#officialPreviewStatus').hidden = !text;
+  $('#officialPhoneOption').hidden = !phoneOption;
+  $('#officialPhoneLogin').href = PHONE_LOGIN_URLS[officialSite];
+}
+function syncScreenControls() {
+  const disabled = officialActionBusy || officialScreenSite !== officialSite;
+  $('#officialScreen').setAttribute('aria-busy', String(disabled));
+  for (const action of ['ack', 'type', 'up', 'down', 'enter', 'backspace', 'select-all', 'tab']) {
+    $('[data-action="official-' + action + '"]').disabled = disabled;
+  }
+}
 function setOfficialBusy(busy) {
+  if (busy) stopPreviewUpdates();
   officialActionBusy = busy;
   $('#officialDialog').querySelectorAll('button:not([data-action="close-dialog"])').forEach(button => { button.disabled = busy; });
-  $('#officialScreen').setAttribute('aria-busy', String(busy));
-  $('[data-action="official-ack"]').disabled = busy || officialScreenSite !== officialSite;
+  syncScreenControls();
   if (!busy && pairLink && !officialTeamBusy) queueMicrotask(connectPairLink);
 }
 function clearOfficialScreen() {
+  stopPreviewUpdates();
+  previewStatus('');
   officialScreenSite = '';
   $('#officialScreen').hidden = true;
   $('#officialScreen').removeAttribute('src');
-  $('[data-action="official-ack"]').disabled = true;
+  syncScreenControls();
 }
 function refreshOfficialSiteLabel(host = '') {
   const done = !!officialBridge?.acknowledged[officialSite];
@@ -847,6 +869,7 @@ function openOfficialDialog({ reconnect = true } = {}) {
   $('#officialText').value = '';
   $('#officialControls').hidden = !officialBridge?.session;
   $('#officialManual').open = false;
+  $('#officialReconnect').hidden = true;
   $('#officialManage').hidden = !officialBridge;
   officialStatus(officialBridge?.session ? 'अपनी वेबसाइट चुनें और उसकी स्क्रीन खोलें।' : 'यह फ़ोन निजी ब्राउज़र सेवा से नहीं जुड़ा है। सेवा का जोड़ने वाला लिंक हो तो उसे इसी ब्राउज़र में खोलें। सामान्य खोज, Python और 3D के लिए यहाँ कुछ भरना ज़रूरी नहीं है।');
   refreshOfficialSiteLabel();
@@ -883,6 +906,7 @@ async function connectOfficial() {
   setOfficialBusy(true);
   $('#officialControls').hidden = true;
   clearOfficialScreen();
+  $('#officialReconnect').hidden = true;
   let connected = false;
   try {
     const base = $('#officialUrl').value.trim().replace(/\/+$/, '');
@@ -902,43 +926,71 @@ async function connectOfficial() {
     connected = true;
   } catch (e) {
     if (officialBridge) { officialBridge.session = ''; officialBridge.acknowledged = {}; }
+    if (officialBridge) { $('#officialControls').hidden = false; $('#officialReconnect').hidden = false; }
     refreshOfficialSiteLabel();
     officialStatus(e.message);
   }
   finally { setOfficialBusy(false); }
   if (connected && $('#officialDialog').open) await viewOfficial();
 }
-async function viewOfficial() {
-  if (!officialBridge?.session || officialActionBusy) return;
-  setOfficialBusy(true);
-  clearOfficialScreen();
+// Follow delayed login redirects for a bounded time after each interaction.
+// Background reads never lock the keyboard. User actions cancel an older read.
+async function viewOfficial(step = 0) {
+  stopPreviewUpdates();
+  const dialog = $('#officialDialog'), bridge = officialBridge, site = officialSite;
+  if (!dialog.open || document.hidden || !bridge?.session || officialActionBusy || officialTeamBusy) return;
+  const request = new AbortController();
+  previewRequest = request;
+  const timeout = setTimeout(() => request.abort(new Error('वेबसाइट से तस्वीर समय पर नहीं मिली।')), 45000);
+  const currentView = () => previewRequest === request && !request.signal.aborted && dialog.open && !document.hidden && bridge === officialBridge && site === officialSite;
+  const screen = $('#officialScreen');
+  const hadFrame = !screen.hidden;
   try {
-    const site = officialSite;
-    officialStatus('वेबसाइट की स्क्रीन आ रही है…');
-    const data = await officialBridge.view(site, AbortSignal.timeout(60000));
-    if (site !== officialSite) return;
+    if (!hadFrame) previewStatus('वेबसाइट की स्क्रीन आ रही है…');
+    const data = await bridge.view(site, request.signal);
+    if (!currentView()) return;
     if (typeof data.image !== 'string' || !/^[A-Za-z0-9+/=]+$/.test(data.image) || data.image.length > 5000000) throw new Error('वेबसाइट की स्क्रीन नहीं मिली।');
-    const screen = $('#officialScreen');
-    screen.src = 'data:image/jpeg;base64,' + data.image;
-    try { await screen.decode(); }
-    catch { throw new Error('वेबसाइट की तस्वीर खुल नहीं पाई। स्क्रीन ताज़ा करें।'); }
-    if (site !== officialSite) return;
+    const next = new Image();
+    next.src = 'data:image/jpeg;base64,' + data.image;
+    if (next.src !== screen.src) {
+      try { await next.decode(); }
+      catch { throw new Error('वेबसाइट की तस्वीर खुल नहीं पाई। स्क्रीन ताज़ा करें।'); }
+      if (!currentView()) return;
+      screen.src = next.src;
+    }
     screen.hidden = false;
     officialScreenSite = site;
+    syncScreenControls();
     refreshOfficialSiteLabel(data.host || '');
-    officialStatus(data.busy ? 'टीम काम कर रही है। स्क्रीन देखने के लिए ताज़ा करें।' : 'स्क्रीन पर टैप करके नियंत्रण करें।');
-  } catch (e) { clearOfficialScreen(); officialStatus(e.message); }
-  finally { setOfficialBusy(false); }
+    if (data.securityCheck) previewStatus('वेबसाइट सुरक्षा-जाँच दिखा रही है। इसे वेबसाइट पर पूरा करें।', true);
+    else if (step === 5) previewStatus('अगर अब भी सिर्फ़ लोगो है, ऊपर “लॉगिन पेज खोलें” दबाएँ।', true);
+    else previewStatus('');
+    if (step < 5) previewTimer = setTimeout(() => viewOfficial(step + 1), [1500, 2500, 4000, 6000, 8000][step]);
+  } catch (e) {
+    if (previewRequest !== request || !dialog.open || document.hidden || (request.signal.aborted && request.signal.reason?.name === 'AbortError')) return;
+    officialScreenSite = ''; // The previous frame may be seen, but not acted on.
+    syncScreenControls();
+    $('#officialReconnect').hidden = e.status !== 401;
+    previewStatus(e.message + (hadFrame ? ' पिछली तस्वीर दिख रही है।' : ''), true);
+  } finally {
+    clearTimeout(timeout);
+    if (previewRequest === request) previewRequest = null;
+  }
 }
 async function officialAction(action, values = {}) {
   if (officialTeamBusy) { officialStatus('टीम का काम पूरा होने दें या चैट से उसे रोकें।'); return false; }
   if (!officialBridge?.session || officialActionBusy) return false;
-  if (action !== 'reset' && officialScreenSite !== officialSite) { officialStatus('पहले वेबसाइट की स्क्रीन खुलने दें या स्क्रीन ताज़ा करें।'); return false; }
+  if (!['reset', 'login'].includes(action) && officialScreenSite !== officialSite) { officialStatus('पहले वेबसाइट की स्क्रीन खुलने दें या स्क्रीन ताज़ा करें।'); return false; }
   setOfficialBusy(true);
   try {
+    if (action === 'login') previewStatus('वेबसाइट का लॉगिन पेज खुल रहा है…');
     await officialBridge.action(officialSite, action, values, AbortSignal.timeout(30000));
-    if (action === 'reset') officialBridge.acknowledged[officialSite] = false;
-  } catch (e) { officialStatus(e.message); return false; }
+    if (action === 'reset' || action === 'login') officialBridge.acknowledged[officialSite] = false;
+    officialScreenSite = ''; // Input resumes when the resulting frame arrives.
+  } catch (e) {
+    if (e.status === 401) $('#officialReconnect').hidden = false;
+    officialStatus(e.message); previewStatus(e.message, true); return false;
+  }
   finally { setOfficialBusy(false); }
   await viewOfficial();
   return true;
@@ -1775,6 +1827,7 @@ function onClick(e) {
       if ($('#teamDialog').open) $('#teamDialog').close();
       show('chat'); $('#input').focus(); break;
     case 'official-browser': openOfficialDialog(); break;
+    case 'official-reconnect':
     case 'official-connect': connectOfficial(); break;
     case 'official-close-session': closeOfficialSession(); break;
     case 'official-forget': closeOfficialSession(true); break;
@@ -1783,6 +1836,7 @@ function onClick(e) {
       if (!officialActionBusy && SITE_IDS.includes(b.dataset.site)) { officialSite = b.dataset.site; clearOfficialScreen(); refreshOfficialSiteLabel(); viewOfficial(); }
       break;
     case 'official-refresh': viewOfficial(); break;
+    case 'official-login': officialAction('login'); break;
     case 'official-up': officialAction('scroll', { delta: -550 }); break;
     case 'official-down': officialAction('scroll', { delta: 550 }); break;
     case 'official-enter': officialAction('key', { key: 'Enter' }); break;
@@ -1975,6 +2029,14 @@ function init() {
   $('#teamForm').addEventListener('submit', saveTeamDialog);
   $('#tdMode').addEventListener('change', syncTeamMode);
   let officialPointer = null;
+  $('#officialDialog').addEventListener('close', () => {
+    clearOfficialScreen();
+    $('#officialText').value = '';
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) stopPreviewUpdates();
+    else if ($('#officialDialog').open) viewOfficial();
+  });
   const screenCoordinates = e => {
     const bounds = e.currentTarget.getBoundingClientRect();
     if (!bounds.width || !bounds.height || !e.currentTarget.naturalWidth) return null;

@@ -76,12 +76,19 @@ async function main() {
     const validScreenshot = screenshot;
     screenshot = Buffer.from('not a JPEG').toString('base64');
     await page.locator('[data-action="official-refresh"]').click();
-    await page.waitForFunction(() => document.querySelector('#officialStatus').textContent.includes('तस्वीर खुल नहीं पाई'));
-    assert.equal(await page.locator('#officialScreen').isVisible(), false);
+    await page.waitForFunction(() => document.querySelector('#officialPreviewStatus').textContent.includes('तस्वीर खुल नहीं पाई'));
+    assert.equal(await page.locator('#officialScreen').isVisible(), true);
+    assert.equal(await page.locator('#officialScreen').getAttribute('src'), 'data:image/jpeg;base64,' + validScreenshot);
     assert.equal(await page.locator('[data-action="official-ack"]').isDisabled(), true);
     screenshot = validScreenshot;
     await page.locator('[data-action="official-refresh"]').click();
-    await page.waitForFunction(() => !document.querySelector('#officialScreen').hidden && document.querySelector('#officialScreen').naturalWidth > 0);
+    await page.waitForFunction(() => !document.querySelector('[data-action="official-ack"]').disabled);
+    // The delayed provider redirect must appear without any user refresh.
+    screenshot = (await page.screenshot({ type: 'jpeg' })).toString('base64');
+    await page.waitForFunction(expected => document.querySelector('#officialScreen').src === expected, 'data:image/jpeg;base64,' + screenshot);
+    await page.locator('[data-action="official-login"]').click();
+    await page.waitForFunction(() => !document.querySelector('[data-action="official-ack"]').disabled);
+    assert.ok(actions.some(a => a.action === 'login' && a.service === 'chatgpt'));
     for (const site of ['chatgpt', 'gemini', 'claude']) {
       await page.locator(`[data-action="official-site"][data-site="${site}"]`).click();
       await page.waitForFunction(host => document.querySelector('#officialSite').textContent.includes(host), hosts[site]);

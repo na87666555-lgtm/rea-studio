@@ -6,7 +6,7 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const { chromium } = require('playwright');
-const { SERVICES, assertAccountReady, submitPrompt } = require('./providers.cjs');
+const { SERVICES, assertOfficialHost, assertAccountReady, submitPrompt } = require('./providers.cjs');
 
 const MAX_BODY = 160000;
 const IDLE_MS = 20 * 60 * 1000;
@@ -161,7 +161,7 @@ function createBridge({ token, origin, executablePath, launch = chromium.launch.
       url.search = ''; url.hash = ''; return url.toString();
     } catch { return ''; }
   }
-  async function pageFor(session, id) {
+  async function pageFor(session, id, openLogin = false) {
     const svc = serviceOf(id);
     const operation = async () => {
       if (session.closed) throw error(401, 'ब्राउज़र सत्र बंद हो गया।');
@@ -180,11 +180,16 @@ function createBridge({ token, origin, executablePath, launch = chromium.launch.
         const page = await session.context.newPage();
         session.pages[id] = { root: page, active: page };
         watchPopup(session, id, page);
-        try { await page.goto(session.resumeUrls[id] || svc.url, { waitUntil: 'domcontentloaded', timeout: 45000 }); }
+        try { if (!openLogin) await page.goto(session.resumeUrls[id] || svc.url, { waitUntil: 'domcontentloaded', timeout: 20000 }); }
         catch { /* screenshot shows the page or network failure to the user */ }
       }
       const record = session.pages[id];
       if (record.active.isClosed()) record.active = record.root;
+      if (openLogin) {
+        delete session.acknowledged[id];
+        try { await record.active.goto(svc.loginUrl, { waitUntil: 'commit', timeout: 20000 }); }
+        catch { throw error(502, 'वेबसाइट का लॉगिन पेज खुल नहीं सका। फिर कोशिश करें।'); }
+      }
       return record.active;
     };
     const next = session.pageQueue.then(operation, operation);
@@ -243,18 +248,24 @@ function createBridge({ token, origin, executablePath, launch = chromium.launch.
       if (url.pathname === '/v1/close' && req.method === 'POST') {
         await body(req); await closeSession(session); return send(res, 200, { ok: true });
       }
-      if (url.pathname === '/v1/status' && req.method === 'GET') return send(res, 200, { acknowledged: session.acknowledged, busy: session.busy });
+      if (url.pathname === '/v1/status' && req.method === 'GET') return send(res, 200, { acknowledged: session.acknowledged, busy: session.busy, activeService: session.activeService });
       if (url.pathname === '/v1/view' && req.method === 'GET') {
         const id = url.searchParams.get('service'); serviceOf(id);
         if (session.busy && session.busyService !== id) throw error(409, 'टीम दूसरी वेबसाइट पर काम कर रही है। पहले काम रोकें।');
         const page = await pageFor(session, id);
         const image = await page.screenshot({ type: 'jpeg', quality: 55, animations: 'disabled', timeout: 15000 });
         let host = ''; try { host = new URL(page.url()).hostname; } catch { /* loading */ }
-        return send(res, 200, { image: image.toString('base64'), viewport: VIEWPORT, host, acknowledged: !!session.acknowledged[id], busy: session.busy });
+        const title = await page.title().catch(() => '');
+        const securityCheck = /just a moment|security verification|verify (?:you are|you.re) human|सुरक्षा जाँच/i.test(title);
+        return send(res, 200, { image: image.toString('base64'), viewport: VIEWPORT, host, securityCheck, acknowledged: !!session.acknowledged[id], busy: session.busy });
       }
       if (url.pathname === '/v1/action' && req.method === 'POST') {
         const data = await body(req); serviceOf(data.service);
         if (session.busy) throw error(409, 'टीम काम कर रही है; पहले उसे रोकें।');
+        if (data.action === 'login') {
+          await pageFor(session, data.service, true);
+          return send(res, 200, { ok: true });
+        }
         const page = await pageFor(session, data.service);
         if (data.action === 'click') {
           const x = Number(data.x), y = Number(data.y);
