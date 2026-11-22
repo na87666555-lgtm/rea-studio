@@ -5,6 +5,7 @@
 const http = require('node:http');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const { createMovieJobs } = require('./render/jobs.cjs');
 const { chromium } = require('playwright');
 const { SERVICES, assertOfficialHost, assertAccountReady, submitPrompt } = require('./providers.cjs');
 
@@ -57,6 +58,7 @@ function createBridge({ token, origin, executablePath, launch = chromium.launch.
   let closing = false;
   let pairing = null;
   const expectedToken = token;
+  const movies = createMovieJobs();
 
   function sign(payload) { return crypto.createHmac('sha256', expectedToken).update(payload).digest('base64url'); }
   function issueDeviceToken() {
@@ -232,6 +234,24 @@ function createBridge({ token, origin, executablePath, launch = chromium.launch.
       const given = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
       const isAdmin = tokenMatches(given, expectedToken);
       if (!isAdmin && !validDeviceToken(given)) throw error(401, 'ब्राउज़र सेवा का पासकोड गलत है।');
+      if (url.pathname.startsWith('/v1/movies')) {
+        const owner = hash(given).toString('hex');
+        if (req.method === 'POST' && url.pathname === '/v1/movies') {
+          const { source } = await body(req);
+          return send(res, 202, movies.start(owner, source));
+        }
+        const match = /^\/v1\/movies\/([a-f0-9-]{36})(?:\/(video|stop))?$/.exec(url.pathname);
+        if (!match) throw error(404, 'रेंडर नहीं मिला।');
+        const job = movies.get(owner, match[1]);
+        if (req.method === 'POST' && match[2] === 'stop') { job.cancel(); return send(res, 200, job.status()); }
+        if (req.method === 'GET' && !match[2]) return send(res, 200, job.status());
+        if (req.method === 'GET' && match[2] === 'video') {
+          const bytes = job.bytes();
+          res.writeHead(200, { 'content-type':'video/mp4', 'content-length':bytes.length, 'cache-control':'no-store', 'access-control-allow-origin':origin, vary:'Origin' });
+          return res.end(bytes);
+        }
+        throw error(405, 'रेंडर अनुरोध सही नहीं है।');
+      }
       if (url.pathname === '/v1/pair-code' && req.method === 'POST') {
         if (!isAdmin) throw error(403, 'नया जोड़ने वाला लिंक केवल सेवा का मालिक बना सकता है।');
         await body(req);
@@ -323,6 +343,7 @@ function createBridge({ token, origin, executablePath, launch = chromium.launch.
       throw error(404, 'यह पेज नहीं मिला।');
     } catch (e) { send(res, e.status || 500, { error: e.publicMessage || 'ब्राउज़र सेवा में त्रुटि आई।' }); }
   });
+  server.on('close', () => movies.close());
   const timer = setInterval(() => {
     if (activeSession && !activeSession.busy && Date.now() - activeSession.touched > idleMs) closeSession(activeSession).catch(() => {});
   }, Math.min(idleMs, 60000));

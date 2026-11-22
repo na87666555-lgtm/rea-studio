@@ -7,5 +7,6 @@ RUN npm ci --omit=dev \
     && rm -rf /var/lib/apt/lists/* /root/.npm \
     && chown -R node:node /app
 COPY --chown=node:node . .
+RUN apt-get update && apt-get install -y --no-install-recommends blender ffmpeg && rm -rf /var/lib/apt/lists/*
 USER node
 CMD ["node", "server.cjs"]
