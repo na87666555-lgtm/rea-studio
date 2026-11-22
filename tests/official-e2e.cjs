@@ -132,9 +132,8 @@ async function main() {
     secondPage.on('request',r=>{if(r.url().startsWith(bridgeUrl)) startupCalls.push(r.url());});
     await secondPage.goto(origin);
     assert.equal(startupCalls.length,0,'opening the app alone must not wake the free browser host');
-    await secondPage.locator('[data-action="open-drawer"]').click();
-    await secondPage.locator('.drawer-options summary').click();
-    await secondPage.locator('.drawer-options [data-action="official-browser"]').click();
+    await secondPage.goto(origin+'/#accounts');
+    await secondPage.locator('#officialDialog[open]').waitFor();
     await secondPage.waitForFunction(()=>!document.querySelector('#officialControls').hidden);
     assert.equal(await secondPage.locator('#officialToken').inputValue(),'');
     assert.notEqual(JSON.parse(await secondPage.evaluate(()=>sessionStorage.getItem('rea.officialBridge.session'))).session,oldSession);

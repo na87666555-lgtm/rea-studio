@@ -12,7 +12,7 @@ import { PROJECT_TOOLS, filesOf, writeProject, projectTool, projectContext, prev
 import { OfficialBridge, SITE_IDS, restoreOfficialBridge, clearOfficialBridgeStorage, pairOfficialBridge, parseWebsiteEdits, buildWebsitePrompt } from './official-bridge.js';
 
 // Bump together with version.json on every release.
-const APP_VERSION = '2026.11.22-1';
+const APP_VERSION = '2026.11.22-2';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const NEW_TITLE = 'नई चैट';
@@ -1930,12 +1930,20 @@ function fitPhoneInDesktopMode() {
   root.style.setProperty('--app-h', on ? `${window.innerHeight / ratio}px` : '');
 }
 
+// A bookmark opens the account screen using only this browser's saved pairing.
+function openAccountBookmark() {
+  if (location.hash !== '#accounts') return;
+  history.replaceState(null, '', location.pathname + location.search);
+  openOfficialDialog();
+}
+
 function init() {
   fitPhoneInDesktopMode();
   window.addEventListener('resize', fitPhoneInDesktopMode);
   window.addEventListener('hashchange', () => {
     const link = takePairingLink();
     if (link) { pairLink = link; connectPairLink(); }
+    else openAccountBookmark();
   });
   document.addEventListener('click', onClick);
   document.addEventListener('toggle', e => {
@@ -2037,6 +2045,7 @@ function init() {
   }
   startAutoUpdate();
   if (pairLink) connectPairLink();
+  else openAccountBookmark();
 }
 
 init();
