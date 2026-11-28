@@ -6,7 +6,7 @@ const { readFile, stat } = require('node:fs/promises');
 const { existsSync } = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
-const { openTeamSettings } = require('./ui-helpers.cjs');
+const { openTeamSettings, openDrawerOption } = require('./ui-helpers.cjs');
 const { createBridge } = require('../browser-bridge/server.cjs');
 const { submitPrompt } = require('../browser-bridge/providers.cjs');
 
@@ -115,7 +115,7 @@ async function main() {
     await page.waitForFunction(()=>document.querySelector('.team-status')?.textContent.includes('साझा जवाब तैयार'),null,{timeout:20000});
     await page.waitForFunction(()=>document.querySelector('.msg.assistant > .content')?.textContent.includes('एक साझा वेबसाइट जवाब'),null,{timeout:10000});
     await page.waitForFunction(()=>!document.querySelector('#sendBtn').classList.contains('stop'));
-    await page.locator('#projectBtn').click(); assert.equal(await page.locator('#projectPath').inputValue(),'index.html');
+    await openDrawerOption(page, '#projectBtn'); assert.equal(await page.locator('#projectPath').inputValue(),'index.html');
     assert.ok((await page.locator('#projectContent').inputValue()).includes('BRIDGE_CODE_TOKEN'));
     const oldSession = JSON.parse(await page.evaluate(()=>sessionStorage.getItem('rea.officialBridge.session'))).session;
     // Losing the provider session after a successful check must block the next

@@ -5,7 +5,7 @@ const { readFile, stat } = require('node:fs/promises');
 const { existsSync } = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
-const { openTeamSettings } = require('./ui-helpers.cjs');
+const { openTeamSettings, openDrawerOption, openSavedChat } = require('./ui-helpers.cjs');
 
 async function main() {
   const root = path.resolve(__dirname, '..');
@@ -106,6 +106,8 @@ async function main() {
 
     // Persistence and a follow-up on the same project.
     await page.reload();
+    assert.equal(await page.locator('#messages .msg').count(), 0);
+    await openSavedChat(page, 'सोलर प्रोजेक्ट');
     assert.equal(await page.locator('#topTitle').innerText(), 'सोलर प्रोजेक्ट');
     calls.length = 0; failGemini = true;
     await page.locator('#input').fill('इसकी लागत और समझाएँ।'); await page.locator('#sendBtn').click();
@@ -118,7 +120,7 @@ async function main() {
     await page.locator('#input').fill('वेब कोड बनाओ'); await page.locator('#sendBtn').click();
     await page.waitForFunction(() => document.querySelectorAll('.team-status').length === 3 && [...document.querySelectorAll('.team-status')].at(-1)?.textContent.includes('साझा जवाब तैयार'));
     assert.equal(claudeSawFile, true); assert.equal(synthesisSawFile, true);
-    await page.locator('#projectBtn').click();
+    await openDrawerOption(page, '#projectBtn');
     assert.equal(await page.locator('#projectPath').inputValue(), 'index.html');
     assert.ok((await page.locator('#projectContent').inputValue()).includes('कोड चला'));
     await page.locator('[data-action="project-preview"]').click();
@@ -128,7 +130,8 @@ async function main() {
     assert.equal(await page.locator('body').getAttribute('data-intruded'), null);
     await page.locator('#projectDialog [data-action="close-dialog"]').click();
     await page.reload();
-    await page.locator('#projectBtn').click();
+    await openSavedChat(page, 'सोलर प्रोजेक्ट');
+    await openDrawerOption(page, '#projectBtn');
     assert.ok((await page.locator('#projectContent').inputValue()).includes('कोड चला'));
     await page.locator('#projectDialog [data-action="close-dialog"]').click();
     failGemini = false; hold = true;
@@ -142,10 +145,11 @@ async function main() {
     await page.evaluate(() => navigator.serviceWorker.ready);
     assert.equal(await page.evaluate(async () => !!(await caches.match('./js/team.js'))), true);
     await context.setOffline(true); await page.reload();
+    await openSavedChat(page, 'सोलर प्रोजेक्ट');
     assert.equal(await page.locator('#topTitle').innerText(), 'सोलर प्रोजेक्ट');
     await context.setOffline(false); hold = false;
     await page.getByRole('button', { name: 'मेनू', exact: true }).click();
-    await page.locator('[data-action="new-chat"]').click();
+    await page.locator('#drawer [data-action="new-chat"]').click();
     await page.locator('#input').fill('एक मॉडल से सामान्य चैट'); await page.locator('#sendBtn').click();
     await page.waitForFunction(() => document.querySelector('.msg.assistant .content')?.textContent.includes('gpt-test'));
     assert.equal(await page.locator('.team-progress').count(), 0);
@@ -161,9 +165,32 @@ async function main() {
             text: i ? '' : 'I am the official ChatGPT model.', steps: [],
           })) },
       ];
-      localStorage.setItem('rea.v1.chats', JSON.stringify([{ id:'old-chat', title:'पुरानी टीम', team: { members: [] }, messages }]));
+      const failed = { id: 'failed', title: 'असफल प्रोजेक्ट', team: { members: [] }, messages: [
+        { role: 'user', content: 'मेरा काम पूरा करो।' },
+        { role: 'assistant', content: '', teamPhase: 'error', teamOpen: true, error: { title: 'कार्य अधूरा' },
+          teamRuns: ['credit/balance', 'network error', 'Failed to fetch'].map(error => ({
+            provider: 'Coarena', model: 'selected-model', status: 'error', error, steps: [],
+          })) },
+      ] };
+      localStorage.setItem('rea.v1.chats', JSON.stringify([failed, { id:'old-chat', title:'पुरानी टीम', team: { members: [] }, messages }]));
+      sessionStorage.setItem('rea.reopenChat', failed.id);
     }, identity);
     await page.reload();
+    await page.locator('#messages .welcome').waitFor();
+    assert.equal(await page.locator('dialog[open], #drawer.open, #messages .team-progress').count(), 0);
+    assert.equal(await page.locator('#messages [data-action="new-team"]').count(), 0);
+    assert.equal(await page.locator('#input').inputValue(), '');
+    assert.equal(await page.locator('.drawer-options').evaluate(el => el.open), false);
+    for (const selector of ['#projectBtn', '#modelChip', '#openAnimation', '[data-action="new-team"]',
+                            '[data-action="official-browser"]', '[data-action="show-settings"]']) {
+      assert.equal(await page.locator('.drawer-options').locator(selector).count(), 1);
+      assert.equal(await page.locator('.drawer-options').locator(selector).isHidden(), true);
+    }
+    await openSavedChat(page, 'असफल प्रोजेक्ट');
+    assert.match(await page.locator('.team-status').innerText(), /0\/3/);
+    await page.locator('#plainChatBtn').click();
+    assert.equal(await page.locator('#messages .team-progress, dialog[open]').count(), 0);
+    await openSavedChat(page, 'पुरानी टीम');
     assert.match(await page.locator('.team-status').innerText(), /एक भूमिका का जवाब · 1\/3/);
     const oldBody = await page.locator('.msg.assistant > .content').innerText();
     assert.match(oldBody, /Coarena/);

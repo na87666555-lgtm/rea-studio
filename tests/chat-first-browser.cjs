@@ -5,6 +5,7 @@ const { createServer } = require('node:http');
 const { readFile, stat } = require('node:fs/promises');
 const { existsSync } = require('node:fs');
 const path = require('node:path');
+const { openSavedChat } = require('./ui-helpers.cjs');
 const assert = require('node:assert/strict');
 
 async function main() {
@@ -95,6 +96,8 @@ async function main() {
       'rea.v1.chats': [{ id: 'incomplete', title: 'अधूरी टीम', team: { mode: 'api', members: [] }, messages: [] }],
     });
     await incomplete.goto(base);
+    assert.equal(await incomplete.locator('#messages .team-welcome').count(), 0);
+    await openSavedChat(incomplete, 'अधूरी टीम');
     assert.match(await send(incomplete, 'चंद्रमा क्या है?'), /प्रकाशित स्रोत/);
     assert.match(await send(incomplete, 'मेरे लिए कहानी लिखो'), /पूरा AI कनेक्शन उपलब्ध नहीं/);
 

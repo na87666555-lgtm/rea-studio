@@ -5,7 +5,7 @@ const { readFile, stat } = require('node:fs/promises');
 const { existsSync } = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
-const { openTeamSettings } = require('./ui-helpers.cjs');
+const { openTeamSettings, openDrawerOption } = require('./ui-helpers.cjs');
 
 async function main() {
   const root = path.resolve(__dirname, '..');
@@ -107,7 +107,7 @@ async function main() {
     assert.deepEqual(prompts.map(p => p.service), ['chatgpt', 'gemini', 'claude', 'claude']);
     assert.ok((await page.locator('.msg.assistant > .content').innerText()).includes('एक साझा अंतिम जवाब'));
     await page.waitForFunction(() => !document.querySelector('#sendBtn').classList.contains('stop'));
-    await page.locator('#projectBtn').click();
+    await openDrawerOption(page, '#projectBtn');
     assert.equal(await page.locator('#projectPath').inputValue(), 'index.html');
     assert.ok((await page.locator('#projectContent').inputValue()).includes('अंतिम कोड'));
     assert.ok(!(await page.evaluate(() => JSON.stringify(localStorage))).includes(key));

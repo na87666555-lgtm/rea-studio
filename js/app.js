@@ -13,7 +13,7 @@ import { PROJECT_TOOLS, filesOf, writeProject, projectTool, projectContext, prev
 import { OfficialBridge, SITE_IDS, restoreOfficialBridge, clearOfficialBridgeStorage, pairOfficialBridge, parseWebsiteEdits, buildWebsitePrompt } from './official-bridge.js';
 
 // Bump together with version.json on every release.
-const APP_VERSION = '2026.11.22-5';
+const APP_VERSION = '2026.11.28-1';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const NEW_TITLE = 'नई चैट';
@@ -22,10 +22,12 @@ const MAX_TOOL_ROUNDS = 8;
 
 let settings = loadSettings();
 let chats = loadChats();
-let currentId = chats[0]?.id || null;
+// Team projects are opened explicitly from history. Treat a project saved by
+// an earlier release the same way when restoring after an automatic update.
+let currentId = chats[0]?.team ? null : chats[0]?.id || null;
 try {
   const reopen = sessionStorage.getItem('rea.reopenChat');
-  if (chats.some(chat => chat.id === reopen)) currentId = reopen;
+  if (chats.some(chat => chat.id === reopen && !chat.team)) currentId = reopen;
   sessionStorage.removeItem('rea.reopenChat');
 } catch { /* storage optional */ }
 let view = 'chat';
@@ -81,7 +83,7 @@ let saveTimer = null;
 function persistChats(now = false) {
   clearTimeout(saveTimer);
   const doSave = () => {
-    const keep = chats.filter(c => c.messages.length || c.id === currentId);
+    const keep = chats.filter(c => c.team || c.messages.length || c.id === currentId);
     if (!saveChats(keep)) toast('फ़ोन की स्टोरेज भर गई है। कुछ पुरानी चैट हटाएँ।');
   };
   if (now) doSave();
@@ -140,7 +142,9 @@ function show(v) {
 
 function renderTopbar() {
   const chip = $('#modelChip');
-  $('#projectBtn').hidden = view !== 'chat' || !current()?.team;
+  const inProject = view === 'chat' && Boolean(current()?.team);
+  $('#projectBtn').hidden = !inProject;
+  $('#plainChatBtn').hidden = !inProject;
   const back = $('#backBtn');
   if (view !== 'chat') {
     $('#topTitle').textContent = view === 'settings' ? 'API और सेटिंग्स' : 'एक साथ कई काम';
@@ -190,8 +194,7 @@ function welcomeHtml() {
   return `<div class="welcome">
     <img src="icons/icon.svg" alt="" width="64" height="64">
     <h1>क्या करना चाहते हैं?</h1>
-    <p>सवाल पूछें, सार्वजनिक पन्ना पढ़ने को दें या लिखें “लाल रंग का घूमता 3D घन बनाओ”।</p>
-    <button type="button" class="btn" data-action="blender-demo">Blender से MP4 बनाएँ</button>
+    <p>नीचे अपना संदेश लिखें।</p>
   </div>`;
 }
 
@@ -479,8 +482,8 @@ async function runGeneration(chat, direct) {
       }
       return;
     }
-    if (!c) throw new Error('इस चैट का API कनेक्शन नहीं मिला। ऊपर मॉडल का नाम दबाकर दूसरा चुनें।');
-    if (!chat.model) throw new Error('कोई मॉडल नहीं चुना गया। ऊपर मॉडल का नाम दबाकर चुनें।');
+    if (!c) throw new Error('इस चैट का AI कनेक्शन उपलब्ध नहीं है।');
+    if (!chat.model) throw new Error('इस चैट के लिए कोई AI मॉडल उपलब्ध नहीं है।');
     await acquire(c.id, c.maxParallel, controller.signal);
     acquired = true;
     state.phase = 'streaming';
@@ -785,7 +788,7 @@ function deleteChat(id) {
   deleteFiles(chatFileIds([chat])).catch(() => {});
   chats = chats.filter(c => c.id !== id);
   if (batch) batch.chatIds = batch.chatIds.filter(x => x !== id);
-  if (currentId === id) currentId = chats[0]?.id || null;
+  if (currentId === id) currentId = chats[0]?.team ? null : chats[0]?.id || null;
   persistChats(true);
   renderChatList();
   if (view === 'chat') { renderChat(); renderTopbar(); }
@@ -1844,6 +1847,7 @@ function onClick(e) {
   const id = b.dataset.id;
   switch (b.dataset.action) {
     case 'blender-demo':
+      show('chat');
       if (!$('#input').value.trim() && !pendingFiles.length) {
         $('#input').value='Blender का नमूना रेंडर करो';
         $('#composer').requestSubmit();
@@ -1852,6 +1856,7 @@ function onClick(e) {
     case 'resume-chat':
       $('#officialDialog').close();
       if ($('#teamDialog').open) $('#teamDialog').close();
+      if (current()?.team) currentId = null;
       show('chat'); $('#input').focus(); break;
     case 'official-browser': openOfficialDialog(); break;
     case 'official-reconnect':
@@ -1881,7 +1886,7 @@ function onClick(e) {
     }
     case 'official-reset': officialAction('reset'); break;
     case 'official-ack': confirmOfficialLogin(); break;
-    case 'open-project': openProjectDialog(); break;
+    case 'open-project': closeDrawer(); openProjectDialog(); break;
     case 'project-save': saveProjectFile(); break;
     case 'project-refresh': refreshProjectFiles(); break;
     case 'project-preview': showProjectPreview(); break;
@@ -1905,7 +1910,7 @@ function onClick(e) {
     case 'show-multi': show('multi'); break;
     case 'open-chat': currentId = id; show('chat'); break;
     case 'delete-chat': deleteChat(id); break;
-    case 'open-model': openModelDialog(); break;
+    case 'open-model': closeDrawer(); openModelDialog(); break;
     case 'md-fetch': mdFetch(); break;
     case 'close-dialog': b.closest('dialog').close(); break;
     case 'copy-msg': {
@@ -2122,10 +2127,6 @@ function init() {
   });
   $('#installForm').addEventListener('submit', e => e.preventDefault());
 
-  if (!currentId) {
-    const c = createChat();
-    currentId = c.id;
-  }
   show('chat');
   syncInstallButtons();
   for (const chat of chats) {

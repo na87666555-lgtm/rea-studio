@@ -14,7 +14,7 @@
   <link rel="stylesheet" href="css/app.css?ui=5">
   <link rel="stylesheet" href="css/animation.css">
   <script type="module" src="js/animation.js"></script>
-  <script type="module" src="js/app.js?ui=8"></script>
+  <script type="module" src="js/app.js?ui=9"></script>
 </head>
 <body>
   <div id="app">
@@ -25,9 +25,12 @@
       </div>
       <div class="drawer-buttons">
         <button type="button" class="btn primary block" data-action="new-chat">+ नई चैट</button>
-        <button type="button" class="btn block" id="openAnimation">◈ 3D ऐनिमेशन</button>
-        <a class="btn block call-link" href="call.html">वीडियो कॉल</a>
         <details class="drawer-options"><summary>और विकल्प</summary>
+        <button type="button" class="btn block" id="openAnimation">3D ऐनिमेशन</button>
+        <button type="button" class="btn block" data-action="blender-demo">Blender से MP4 बनाएँ</button>
+        <a class="btn block call-link" href="call.html">वीडियो कॉल</a>
+        <button type="button" id="projectBtn" class="btn block" data-action="open-project" hidden>प्रोजेक्ट कोड</button>
+        <button type="button" id="modelChip" class="btn block" data-action="open-model" hidden>मॉडल चुनें</button>
         <button type="button" class="btn block" data-action="new-team">टीम की सेटिंग</button>
         <button type="button" class="btn block" data-action="official-browser">वेबसाइट खाते जोड़ें</button>
         <button type="button" class="btn block" data-action="show-multi">⚡ एक साथ कई काम</button>
@@ -46,8 +49,7 @@
         <button type="button" class="icon-btn only-mobile" data-action="open-drawer" aria-label="मेनू">☰</button>
         <button type="button" id="backBtn" class="icon-btn" data-action="show-chat" aria-label="वापस" hidden>←</button>
         <div class="topbar-title" id="topTitle">Rea Studio</div>
-        <button type="button" id="projectBtn" class="chip" data-action="open-project" hidden>⌘ कोड</button>
-        <button type="button" id="modelChip" class="chip" data-action="open-model">मॉडल चुनें</button>
+        <button type="button" id="plainChatBtn" class="btn small" data-action="new-chat" hidden>सामान्य चैट</button>
       </header>
 
       <section id="chatView" class="view chat-view">
